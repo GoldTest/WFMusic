@@ -8,6 +8,9 @@ import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.net.URL
+import javax.sound.sampled.AudioSystem
+import javax.sound.sampled.FloatControl
+import javax.sound.sampled.Port
 
 class AudioPlayer {
     private var player: Player? = null
@@ -24,11 +27,67 @@ class AudioPlayer {
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
 
+    var onFinished: (() -> Unit)? = null
+
     private var seekOffsetSec = 0.0
     private var contentLength: Long? = null
+    private var currentVolume: Float = 0.8f
 
     fun setVolume(p: Int) {
-        // JLayer basic Player doesn't support volume control.
+        currentVolume = p / 100f
+        updateDeviceVolume()
+    }
+
+    private fun updateDeviceVolume() {
+        try {
+            val p = player ?: return
+            
+            // 方案 1: 尝试通过反射 JLayer 的 device -> line 设置音量 (针对 SourceDataLine)
+            try {
+                val deviceField = p.javaClass.getDeclaredField("device")
+                deviceField.isAccessible = true
+                val device = deviceField.get(p)
+                
+                val lineField = device.javaClass.getDeclaredField("line")
+                lineField.isAccessible = true
+                val line = lineField.get(device) as? javax.sound.sampled.SourceDataLine
+                
+                if (line != null && line.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
+                    val gainControl = line.getControl(FloatControl.Type.MASTER_GAIN) as FloatControl
+                    val volume = currentVolume.coerceIn(0.0001f, 1f)
+                    val dB = (Math.log10(volume.toDouble()) * 20.0).toFloat()
+                    gainControl.value = dB.coerceIn(gainControl.minimum, gainControl.maximum)
+                    return // 成功设置，退出
+                }
+            } catch (e: Exception) {
+                // 方案 1 失败，尝试方案 2
+            }
+
+            // 方案 2: 尝试直接控制系统的 MASTER_GAIN (针对某些系统环境)
+            try {
+                val mixers = AudioSystem.getMixerInfo()
+                for (mixerInfo in mixers) {
+                    val mixer = AudioSystem.getMixer(mixerInfo)
+                    val lineInfos = mixer.sourceLineInfo
+                    for (lineInfo in lineInfos) {
+                        val line = mixer.getLine(lineInfo)
+                        if (line is javax.sound.sampled.SourceDataLine && line.isOpen) {
+                            if (line.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
+                                val gainControl = line.getControl(FloatControl.Type.MASTER_GAIN) as FloatControl
+                                val volume = currentVolume.coerceIn(0.0001f, 1f)
+                                val dB = (Math.log10(volume.toDouble()) * 20.0).toFloat()
+                                gainControl.value = dB.coerceIn(gainControl.minimum, gainControl.maximum)
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                println("Failed to set volume via Mixer: ${e.message}")
+            }
+
+        } catch (e: Exception) {
+            println("Failed to set volume: ${e.message}")
+        }
     }
 
     suspend fun loadOnline(track: OnlineTrack) {
@@ -87,6 +146,13 @@ class AudioPlayer {
                 val bufferedStream = java.io.BufferedInputStream(inputStream)
                 val p = Player(bufferedStream)
                 player = p
+                
+                // 延迟一小会儿等待 JLayer 初始化底层音频设备
+                scope.launch {
+                    delay(500)
+                    updateDeviceVolume()
+                }
+                
                 _isPlaying.value = true
                 _error.value = null
                 
@@ -128,6 +194,7 @@ class AudioPlayer {
                 if (_isPlaying.value) {
                     _isPlaying.value = false
                     _positionSec.value = _durationSec.value ?: 0.0
+                    onFinished?.invoke()
                 }
             } catch (e: Exception) {
                 if (e !is CancellationException) {

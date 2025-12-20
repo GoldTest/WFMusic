@@ -1,6 +1,10 @@
 package com.workforboss.music
 
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -52,7 +56,6 @@ fun MusicPlayerTab() {
 @Composable
 private fun MusicPlayerContent() {
     val scope = rememberCoroutineScope()
-    val dark = MaterialTheme.colors.isLight.not()
     val chain = remember { SourceChain() }
     var searchText by remember { mutableStateOf("") }
     
@@ -67,7 +70,6 @@ private fun MusicPlayerContent() {
 
     var searchLoading by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
-    var lyrics by remember { mutableStateOf<String?>(null) }
     var coverUrl by remember { mutableStateOf<String?>(null) }
 
     var library by remember { 
@@ -83,6 +85,74 @@ private fun MusicPlayerContent() {
     val playerError by player.error.collectAsState()
     var selectedPlaylistId by remember {
         mutableStateOf(library.playlists.firstOrNull()?.id)
+    }
+    var playingPlaylistId by remember { mutableStateOf<String?>(null) }
+    var playingIndex by remember { mutableStateOf(-1) }
+    var showRenameDialog by remember { mutableStateOf<String?>(null) } // playlistId
+
+    // 定义播放下一首的逻辑
+    val playNext = {
+        val pid = playingPlaylistId
+        val idx = playingIndex
+        if (pid != null && idx != -1) {
+            val playlist = library.playlists.find { it.id == pid }
+            if (playlist != null && playlist.items.isNotEmpty()) {
+                val nextIdx = (idx + 1) % playlist.items.size
+                val nextItem = playlist.items[nextIdx]
+                playingIndex = nextIdx
+                
+                scope.launch {
+                    msg = "正在自动播放下一首: ${nextItem.title}..."
+                    runCatching {
+                        // 策略：如果是播放列表中的音乐，优先检查本地文件
+                        val localFile = Storage.getMusicFile(nextItem.source, nextItem.id)
+                        if (localFile.exists()) {
+                            msg = "正在播放本地缓存: ${nextItem.title}"
+                            player.loadLocal(LocalTrack(
+                                id = nextItem.id,
+                                path = localFile.absolutePath,
+                                title = nextItem.title,
+                                artist = nextItem.artist,
+                                album = nextItem.album,
+                                durationMillis = nextItem.durationMs
+                            ))
+                        } else {
+                            val url = chain.streamUrlFor(nextItem.source, nextItem.id)
+                            if (url.isNullOrBlank()) throw Exception("未能获取到有效的播放地址")
+                            
+                            // 异步下载到本地，但不阻塞播放
+                            scope.launch(Dispatchers.IO) {
+                                runCatching {
+                                    Storage.downloadMusic(url, localFile)
+                                }
+                            }
+                            
+                            msg = "从网络获取成功，开始播放"
+                            player.loadOnline(OnlineTrack(
+                                id = nextItem.id, 
+                                title = nextItem.title, 
+                                artist = nextItem.artist, 
+                                album = nextItem.album,
+                                durationMillis = nextItem.durationMs,
+                                previewUrl = url,
+                                coverUrl = nextItem.coverUrl
+                            ))
+                        }
+                        player.play()
+                        coverUrl = nextItem.coverUrl
+                    }.onFailure {
+                        msg = "自动播放失败: ${it.message}"
+                    }
+                }
+            }
+        }
+    }
+
+    // 设置播放器的完成回调
+    LaunchedEffect(player) {
+        player.onFinished = {
+            playNext()
+        }
     }
 
     DisposableEffect(Unit) {
@@ -278,15 +348,18 @@ private fun MusicPlayerContent() {
                                     player = player,
                                     scope = scope,
                                     library = library,
-                                    onTrackSelect = { lrc, cover ->
-                                        lyrics = lrc
+                                    onTrackSelect = { cover ->
                                         coverUrl = cover
                                     },
                                     onLibraryUpdate = {
                                         library = it
                                         Storage.saveLibrary(it)
                                     },
-                                    onMsg = { msg = it }
+                                    onMsg = { msg = it },
+                                    onClearPlayingContext = {
+                                        playingPlaylistId = null
+                                        playingIndex = -1
+                                    }
                                 )
                             }
                         }
@@ -296,18 +369,18 @@ private fun MusicPlayerContent() {
             
             // 右侧：播放器控制与列表 (垂直堆叠)
             Column(Modifier.weight(1.2f).fillMaxHeight().padding(12.dp)) {
-                // 当前播放卡片
+                // 当前播放卡片 (减小高度，只保留封面和控制)
                 Card(
-                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    modifier = Modifier.fillMaxWidth().wrapContentHeight(),
                     elevation = 4.dp,
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Column(Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("正在播放", style = MaterialTheme.typography.subtitle1)
                         Spacer(Modifier.height(12.dp))
                         
-                        // 频谱/封面区域
-                        Box(Modifier.fillMaxWidth().height(140.dp).background(Color.Black.copy(alpha = 0.05f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                        // 封面区域
+                        Box(Modifier.fillMaxWidth().height(160.dp).background(Color.Black.copy(alpha = 0.05f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
                             SpectrumVisualization(isPlaying = isPlaying)
                             val currentCover = coverUrl
                             if (currentCover != null) {
@@ -331,73 +404,46 @@ private fun MusicPlayerContent() {
                             onVolumePercent = { player.setVolume(it) },
                             onSeek = { player.seekTo(it) }
                         )
-                        
-                        Spacer(Modifier.height(12.dp))
-                        Text("歌词", style = MaterialTheme.typography.subtitle2, color = MaterialTheme.colors.primary)
-                        Spacer(Modifier.height(4.dp))
-                        Box(
-                            Modifier.fillMaxWidth()
-                                .weight(1.5f) // 增加歌词权重，使其占更多空间
-                                .background(Color.Black.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
-                                .padding(4.dp)
-                        ) {
-                            val currentLyrics = lyrics
-                            if (!currentLyrics.isNullOrBlank()) {
-                                val scrollState = rememberLazyListState()
-                                LazyColumn(
-                                    modifier = Modifier.fillMaxSize(),
-                                    state = scrollState,
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    contentPadding = PaddingValues(vertical = 16.dp)
-                                ) {
-                                    items(currentLyrics.lines()) { line ->
-                                        if (line.isNotBlank()) {
-                                            Text(
-                                                line.replace(Regex("\\[.*?\\]"), ""), // 去除时间标签
-                                                style = MaterialTheme.typography.body1.copy(
-                                                    lineHeight = 24.sp,
-                                                    textAlign = TextAlign.Center
-                                                ),
-                                                modifier = Modifier.padding(vertical = 4.dp, horizontal = 12.dp),
-                                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.8f)
-                                            )
-                                        }
-                                    }
-                                }
-                            } else {
-                                Column(
-                                    Modifier.fillMaxSize(),
-                                    verticalArrangement = Arrangement.Center,
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Icon(Icons.Default.PlayArrow, null, tint = Color.Gray.copy(alpha = 0.3f), modifier = Modifier.size(48.dp))
-                                    Text("暂无歌词", color = Color.Gray)
-                                }
-                            }
-                        }
                     }
                 }
                 
                 Spacer(Modifier.height(16.dp))
                 
-                // 播放列表卡片
+                // 播放列表卡片 (增加权重，使其显示更多)
                 Card(
-                    modifier = Modifier.fillMaxWidth().weight(0.8f), // 减小列表权重，为歌词让路
+                    modifier = Modifier.fillMaxWidth().weight(1f),
                     elevation = 4.dp,
                     shape = RoundedCornerShape(16.dp)
                 ) {
                     Column(Modifier.fillMaxSize().padding(16.dp)) {
-                        Text("我的列表", style = MaterialTheme.typography.subtitle1)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("我的列表", style = MaterialTheme.typography.subtitle1)
+                            Spacer(Modifier.weight(1f))
+                            // 添加创建播放列表按钮
+                            IconButton(onClick = {
+                                val name = "新列表 ${library.playlists.size + 1}"
+                                library = PlaylistManager.createPlaylist(name, library)
+                                Storage.saveLibrary(library)
+                                selectedPlaylistId = library.playlists.lastOrNull()?.id
+                            }) {
+                                Icon(Icons.Default.Add, "Create Playlist", tint = MaterialTheme.colors.primary)
+                            }
+                        }
                         Spacer(Modifier.height(8.dp))
                         PlaylistView(
                             library = library,
                             selectedId = selectedPlaylistId,
+                            playingPlaylistId = playingPlaylistId,
+                            playingIndex = playingIndex,
                             onSelect = { selectedPlaylistId = it },
-                            onDelete = {
-                                library = PlaylistManager.deletePlaylist(it, library)
-                                selectedPlaylistId = library.playlists.firstOrNull()?.id
+                            onDelete = { pid ->
+                                library = PlaylistManager.deletePlaylist(pid, library)
+                                if (selectedPlaylistId == pid) {
+                                    selectedPlaylistId = library.playlists.firstOrNull()?.id
+                                }
                                 Storage.saveLibrary(library)
                             },
+                            onRename = { showRenameDialog = it },
                             onMoveUp = { pid, idx ->
                                 library = PlaylistManager.reorderPlaylist(pid, idx, maxOf(0, idx - 1), library)
                                 Storage.saveLibrary(library)
@@ -411,22 +457,46 @@ private fun MusicPlayerContent() {
                                 library = PlaylistManager.removeFromPlaylist(pid, idx, library)
                                 Storage.saveLibrary(library)
                             },
-                            onPlayItem = { item ->
+                            onPlayItem = { item, idx ->
+                                playingPlaylistId = selectedPlaylistId
+                                playingIndex = idx
                                 scope.launch {
                                     msg = "正在获取播放链接: ${item.title}..."
                                     runCatching {
-                                        val url = chain.streamUrlFor(item.source, item.id)
-                                        if (url.isNullOrBlank()) throw Exception("未能获取到有效的播放地址")
-                                        msg = "成功获取链接，开始播放"
-                                        player.loadOnline(OnlineTrack(
-                                            id = item.id, 
-                                            title = item.title, 
-                                            artist = item.artist, 
-                                            album = item.album,
-                                            durationMillis = item.durationMs,
-                                            previewUrl = url,
-                                            coverUrl = item.coverUrl
-                                        ))
+                                        // 策略：如果是播放列表中的音乐，优先检查本地文件
+                                        val localFile = Storage.getMusicFile(item.source, item.id)
+                                        if (localFile.exists()) {
+                                            msg = "正在播放本地缓存: ${item.title}"
+                                            player.loadLocal(LocalTrack(
+                                                id = item.id,
+                                                path = localFile.absolutePath,
+                                                title = item.title,
+                                                artist = item.artist,
+                                                album = item.album,
+                                                durationMillis = item.durationMs
+                                            ))
+                                        } else {
+                                            val url = chain.streamUrlFor(item.source, item.id)
+                                            if (url.isNullOrBlank()) throw Exception("未能获取到有效的播放地址")
+                                            
+                                            // 异步下载到本地，但不阻塞播放
+                                            scope.launch(Dispatchers.IO) {
+                                                runCatching {
+                                                    Storage.downloadMusic(url, localFile)
+                                                }
+                                            }
+                                            
+                                            msg = "从网络获取成功，开始播放"
+                                            player.loadOnline(OnlineTrack(
+                                                id = item.id, 
+                                                title = item.title, 
+                                                artist = item.artist, 
+                                                album = item.album,
+                                                durationMillis = item.durationMs,
+                                                previewUrl = url,
+                                                coverUrl = item.coverUrl
+                                            ))
+                                        }
                                         player.play()
                                         coverUrl = item.coverUrl
                                     }.onFailure {
@@ -440,6 +510,38 @@ private fun MusicPlayerContent() {
             }
         }
     }
+
+    // 重命名对话框
+    val renamingId = showRenameDialog
+    if (renamingId != null) {
+        val pl = library.playlists.find { it.id == renamingId }
+        if (pl != null) {
+            var newName by remember { mutableStateOf(pl.name) }
+            AlertDialog(
+                onDismissRequest = { showRenameDialog = null },
+                title = { Text("重命名播放列表") },
+                text = {
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        label = { Text("列表名称") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        library = PlaylistManager.renamePlaylist(renamingId, newName, library)
+                        Storage.saveLibrary(library)
+                        showRenameDialog = null
+                    }) { Text("确定") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showRenameDialog = null }) { Text("取消") }
+                }
+            )
+        }
+    }
 }
 
 @Composable
@@ -449,9 +551,10 @@ private fun SearchResultItem(
     player: AudioPlayer,
     scope: kotlinx.coroutines.CoroutineScope,
     library: LibraryState,
-    onTrackSelect: (String?, String?) -> Unit,
+    onTrackSelect: (String?) -> Unit,
     onLibraryUpdate: (LibraryState) -> Unit,
-    onMsg: (String) -> Unit
+    onMsg: (String) -> Unit,
+    onClearPlayingContext: () -> Unit
 ) {
     var loadingUrl by remember { mutableStateOf(false) }
     Card(
@@ -527,7 +630,6 @@ private fun SearchResultItem(
                             throw Exception("未能获取到有效的播放地址")
                         }
                         onMsg("成功获取链接，开始播放: ${t.title}")
-                        val lrc = chain.lyricsFor(t.source, t.id)
                         var actualCover = t.coverUrl
                         if (actualCover.isNullOrBlank()) {
                             actualCover = chain.coverFor(t.source, t.id)
@@ -541,7 +643,8 @@ private fun SearchResultItem(
                             previewUrl = url,
                             coverUrl = actualCover
                         )
-                        onTrackSelect(lrc, actualCover)
+                        onTrackSelect(actualCover)
+                        onClearPlayingContext()
                         player.loadOnline(ot)
                         player.play()
                     }.onFailure {
@@ -581,6 +684,31 @@ private fun SearchResultItem(
                             onMsg("已添加到列表: ${pl.name}")
                             expanded = false
                         }) { Text(pl.name) }
+                    }
+                    Divider()
+                    DropdownMenuItem({
+                        val newPlaylistName = "新列表 ${library.playlists.size + 1}"
+                        var newState = PlaylistManager.createPlaylist(newPlaylistName, library)
+                        val newPlId = newState.playlists.last().id
+                        val item = MusicItemId(
+                            id = t.id,
+                            source = t.source,
+                            title = t.title,
+                            artist = t.artist,
+                            album = t.album,
+                            durationMs = t.durationMs,
+                            coverUrl = t.coverUrl
+                        )
+                        newState = PlaylistManager.addToPlaylist(newPlId, item, newState)
+                        onLibraryUpdate(newState)
+                        onMsg("已创建新列表并添加: $newPlaylistName")
+                        expanded = false
+                    }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("添加到新列表")
+                        }
                     }
                 }
             }
@@ -797,16 +925,34 @@ private fun DropdownMenuButton(label: String, playlists: List<Playlist>, onSelec
 private fun PlaylistView(
     library: LibraryState,
     selectedId: String?,
+    playingPlaylistId: String?,
+    playingIndex: Int,
     onSelect: (String) -> Unit,
     onDelete: (String) -> Unit,
+    onRename: (String) -> Unit,
     onMoveUp: (String, Int) -> Unit,
     onMoveDown: (String, Int) -> Unit,
     onRemoveItem: (String, Int) -> Unit,
-    onPlayItem: (MusicItemId) -> Unit
+    onPlayItem: (MusicItemId, Int) -> Unit
 ) {
     Column {
         val scroll = rememberScrollState()
-        Row(Modifier.horizontalScroll(scroll)) {
+        val scope = rememberCoroutineScope()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(scroll)
+                .draggable(
+                    orientation = Orientation.Horizontal,
+                    state = rememberDraggableState { delta ->
+                        scope.launch {
+                            scroll.scrollTo(scroll.value - delta.toInt())
+                        }
+                    }
+                )
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             library.playlists.forEach { pl ->
                 OutlinedButton(
                     onClick = { onSelect(pl.id) },
@@ -825,6 +971,10 @@ private fun PlaylistView(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("共 ${currentPlaylist.items.size} 首歌曲", style = MaterialTheme.typography.caption)
                 Spacer(Modifier.weight(1f))
+                TextButton(onClick = { onRename(currentPlaylist.id) }) {
+                    Text("重命名", style = MaterialTheme.typography.caption)
+                }
+                Spacer(Modifier.width(8.dp))
                 TextButton(onClick = { onDelete(currentPlaylist.id) }) {
                     Text("删除列表", color = Color.Red.copy(alpha = 0.7f), style = MaterialTheme.typography.caption)
                 }
@@ -832,7 +982,8 @@ private fun PlaylistView(
             
             LazyColumn(Modifier.fillMaxSize()) {
                 itemsIndexed(currentPlaylist.items) { idx, item ->
-                    PlaylistItemView(idx, item, currentPlaylist.id, onMoveUp, onMoveDown, onRemoveItem, onPlayItem)
+                    val isPlaying = playingPlaylistId == currentPlaylist.id && playingIndex == idx
+                    PlaylistItemView(idx, item, currentPlaylist.id, isPlaying, onMoveUp, onMoveDown, onRemoveItem, onPlayItem)
                 }
             }
         }
@@ -844,27 +995,38 @@ private fun PlaylistItemView(
     idx: Int,
     item: MusicItemId,
     playlistId: String,
+    isPlaying: Boolean,
     onMoveUp: (String, Int) -> Unit,
     onMoveDown: (String, Int) -> Unit,
     onRemoveItem: (String, Int) -> Unit,
-    onPlayItem: (MusicItemId) -> Unit
+    onPlayItem: (MusicItemId, Int) -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        elevation = 0.dp,
-        backgroundColor = Color.Black.copy(alpha = 0.05f),
-        shape = RoundedCornerShape(8.dp)
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onPlayItem(item, idx) },
+        elevation = if (isPlaying) 2.dp else 0.dp,
+        backgroundColor = if (isPlaying) MaterialTheme.colors.primary.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.05f),
+        shape = RoundedCornerShape(8.dp),
+        border = if (isPlaying) BorderStroke(1.dp, MaterialTheme.colors.primary.copy(alpha = 0.5f)) else null
     ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                "${idx + 1}", 
-                style = MaterialTheme.typography.caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), 
-                modifier = Modifier.width(28.dp),
-                color = MaterialTheme.colors.primary.copy(alpha = 0.7f)
-            )
+            if (isPlaying) {
+                Icon(
+                    Icons.Default.PlayArrow, 
+                    null, 
+                    tint = MaterialTheme.colors.primary, 
+                    modifier = Modifier.size(16.dp).padding(end = 4.dp)
+                )
+            } else {
+                Text(
+                    "${idx + 1}", 
+                    style = MaterialTheme.typography.caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), 
+                    modifier = Modifier.width(28.dp),
+                    color = MaterialTheme.colors.primary.copy(alpha = 0.7f)
+                )
+            }
             
             Column(Modifier.weight(1f)) {
                 Text(
@@ -905,7 +1067,7 @@ private fun PlaylistItemView(
             }
 
             Row {
-                IconButton(onClick = { onPlayItem(item) }, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = { onPlayItem(item, idx) }, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colors.primary)
                 }
                 

@@ -9,12 +9,21 @@ import java.nio.file.StandardCopyOption
 object Storage {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
     private val appDir: File by lazy {
-        val dir = File(System.getProperty("user.home"), ".workforboss")
+        // 使用用户文档目录下的 WorkForBoss 文件夹，而不是用户根目录下的隐藏文件夹
+        val documentsDir = File(System.getProperty("user.home"), "Documents")
+        val dir = File(documentsDir, "WorkForBoss")
         if (!dir.exists()) dir.mkdirs()
         dir
     }
     private val libraryFile: File by lazy { File(appDir, "music_library.json") }
+    private val musicDir: File by lazy { File(appDir, "Music").apply { if (!exists()) mkdirs() } }
     private val cacheDir: File by lazy { File(appDir, "cache").apply { if (!exists()) mkdirs() } }
+
+    fun getMusicFile(source: String, id: String): File {
+        // 按照 来源/ID.mp3 存储，确保唯一性
+        val sourceDir = File(musicDir, source).apply { if (!exists()) mkdirs() }
+        return File(sourceDir, "$id.mp3")
+    }
 
     fun loadLibrary(): LibraryState {
         if (!libraryFile.exists()) return LibraryState()
@@ -25,24 +34,39 @@ object Storage {
         libraryFile.writeText(json.encodeToString(LibraryState.serializer(), state))
     }
 
-    fun cacheFileNameFor(url: String): File {
-        val name = url.hashCode().toString() + ".mp3"
-        return File(cacheDir, name)
-    }
 
-    fun cacheOnlineAudio(url: String) : File {
-        val target = cacheFileNameFor(url)
-        if (target.exists()) return target
-        val tmp = File.createTempFile("audio", ".tmp", cacheDir)
-        java.net.URL(url).openStream().use { input ->
-            Files.copy(input, tmp.toPath(), StandardCopyOption.REPLACE_EXISTING)
+    fun downloadMusic(url: String, target: File, onProgress: ((Float) -> Unit)? = null) {
+        if (target.exists()) return
+        val tmp = File.createTempFile("download", ".tmp", cacheDir)
+        try {
+            val conn = java.net.URL(url).openConnection()
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+            if (url.contains("qqmusic") || url.contains("qq.com")) {
+                conn.setRequestProperty("Referer", "https://y.qq.com/")
+            } else if (url.contains("migu.cn")) {
+                conn.setRequestProperty("Referer", "https://m.music.migu.cn/")
+            }
+            
+            val totalSize = conn.contentLengthLong
+            conn.getInputStream().use { input ->
+                tmp.outputStream().use { output ->
+                    val buffer = ByteArray(8192)
+                    var bytesRead: Int
+                    var totalRead: Long = 0
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
+                        totalRead += bytesRead
+                        if (totalSize > 0) {
+                            onProgress?.invoke(totalRead.toFloat() / totalSize)
+                        }
+                    }
+                }
+            }
+            Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        } catch (e: Exception) {
+            tmp.delete()
+            throw e
         }
-        Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
-        return target
-    }
-
-    fun deleteLocalTrackFile(path: String): Boolean {
-        return runCatching { Files.deleteIfExists(Path.of(path)) }.isSuccess
     }
 
     fun moveLocalTrackFile(path: String, toDir: File): Boolean {

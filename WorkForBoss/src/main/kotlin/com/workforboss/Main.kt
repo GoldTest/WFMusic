@@ -21,8 +21,15 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.rememberWindowState
 import androidx.compose.ui.window.application
+import androidx.compose.ui.window.Tray
+import androidx.compose.ui.window.rememberTrayState
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.inset
+import java.awt.Toolkit
 import com.workforboss.music.MusicPlayerTab
 import kotlin.math.PI
 import kotlin.math.cos
@@ -230,12 +237,79 @@ fun App() {
 }
 
 fun main() = application {
-    Window(
-        onCloseRequest = ::exitApplication,
-        title = "WorkForBoss",
-        state = rememberWindowState(width = 1200.dp, height = 900.dp)
-    ) {
-        App()
+    val screenSize = Toolkit.getDefaultToolkit().screenSize
+    val windowWidth = (screenSize.width / 3).coerceAtLeast(600)
+    val windowHeight = (screenSize.height * 0.8).toInt()
+    
+    val x = screenSize.width - windowWidth
+    val y = (screenSize.height - windowHeight) / 2
+
+    var isVisible by remember { mutableStateOf(true) }
+    val trayState = rememberTrayState()
+    
+    // 自定义绘制托盘图标：一个圆圈中间带个音符/播放按钮的形状
+    val iconColor = Color(0xFF4CAF50) // 鲜艳的绿色
+    val icon = remember {
+        object : Painter() {
+            override val intrinsicSize: Size = Size(256f, 256f)
+            override fun DrawScope.onDraw() {
+                val padding = size.width * 0.1f
+                inset(padding, padding) {
+                    // 绘制外圆
+                     drawCircle(
+                         color = iconColor,
+                         radius = size.width / 2f,
+                         style = Stroke(width = size.width * 0.1f)
+                     )
+                     // 绘制音符形状
+                     val notePath = Path().apply {
+                         // 音符头部 (左下圆圈)
+                         addOval(androidx.compose.ui.geometry.Rect(
+                             left = size.width * 0.25f,
+                             top = size.height * 0.55f,
+                             right = size.width * 0.5f,
+                             bottom = size.height * 0.8f
+                         ))
+                         // 音符杆 (向上竖线)
+                         moveTo(size.width * 0.5f, size.height * 0.65f)
+                         lineTo(size.width * 0.5f, size.height * 0.25f)
+                         // 音符符尾 (向右横线/斜线)
+                         lineTo(size.width * 0.75f, size.height * 0.35f)
+                     }
+                     drawPath(
+                         path = notePath,
+                         color = iconColor,
+                         style = Stroke(width = size.width * 0.1f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                     )
+                 }
+            }
+        }
     }
+
+    if (isVisible) {
+        Window(
+            onCloseRequest = { isVisible = false },
+            title = "WorkForBoss",
+            state = rememberWindowState(
+                position = WindowPosition(x.dp, y.dp),
+                width = windowWidth.dp,
+                height = windowHeight.dp
+            )
+        ) {
+            App()
+        }
+    }
+
+    Tray(
+        state = trayState,
+        icon = icon,
+        tooltip = "WorkForBoss",
+        onAction = { isVisible = true },
+        menu = {
+            Item("Show Window", onClick = { isVisible = true })
+            Separator()
+            Item("Exit", onClick = { exitApplication() })
+        }
+    )
 }
 
