@@ -26,6 +26,7 @@ web/dist/
 out/
 bin/
 *.class
+.gradle
 
 !.gradle/wrapper/gradle-wrapper.jar
 !**/gradle/wrapper/gradle-wrapper.jar
