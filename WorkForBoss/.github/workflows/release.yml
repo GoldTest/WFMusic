@@ -1,4 +1,4 @@
-name: Windows Build & Release
+name: WFMusic Build & Release
 
 on:
   push:

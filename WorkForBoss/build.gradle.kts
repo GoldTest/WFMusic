@@ -37,16 +37,16 @@ compose.desktop {
         mainClass = "com.workforboss.MainKt"
         nativeDistributions {
             targetFormats(TargetFormat.Exe, TargetFormat.Msi)
-            packageName = "WorkForBoss"
+            packageName = "WFMusic"
             packageVersion = "0.1.0"
-            description = "WorkForBoss Music Player"
-            copyright = "© 2025 WorkForBoss. All rights reserved."
-            vendor = "WorkForBoss"
+            description = "WFMusic Player"
+            copyright = "© 2025 WFMusic. All rights reserved."
+            vendor = "WFMusic"
             
             windows {
                 shortcut = true
                 menu = true
-                menuGroup = "WorkForBoss"
+                menuGroup = "WFMusic"
                 // upgradeUuid 建议固定一个，这样覆盖安装时能识别是同一个应用
                 upgradeUuid = "8c6c9a30-3c1d-4d7e-9e8a-8c6c9a303c1d"
                 iconFile.set(project.file("src/main/resources/icon.png"))
