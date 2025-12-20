@@ -1,0 +1,157 @@
+package com.workforboss.music.sources
+
+import io.ktor.client.*
+import io.ktor.client.call.*
+import io.ktor.client.engine.cio.*
+import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.request.*
+import io.ktor.serialization.kotlinx.json.*
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.*
+
+class MiguSource : SourceAdapter {
+    private val client = HttpClient(CIO) {
+        install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+    }
+    override val name: String = "migu"
+
+    override suspend fun search(q: String): List<Track> {
+        val proxies = listOf(
+            "https://api.paugram.com/music",
+            "https://api.liuzhijin.cn",
+            "https://api.v0.pw/music"
+        )
+        // 1. 尝试直连新版搜索接口
+        val directResult = runCatching {
+            val resp: String = client.get("https://c.musicapp.migu.cn/MIGUM2.0/v1.0/content/search_all.do") {
+                url {
+                    parameters.append("text", q)
+                    parameters.append("searchSwitch", "{song:1}")
+                    parameters.append("pageSize", "30")
+                    parameters.append("pageNo", "1")
+                }
+                header("Referer", "https://m.music.migu.cn/")
+                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+            }.body()
+            
+            val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
+            val list = json.jsonObject["songResultData"]?.jsonObject?.get("result")?.jsonArray ?: emptyJsonArray
+            list.map { it.jsonObject }
+        }.getOrNull()
+
+        if (directResult != null && directResult.isNotEmpty()) {
+            return directResult.map { s ->
+                Track(
+                    id = s["copyrightId"]?.jsonPrimitive?.content ?: s["id"]?.jsonPrimitive?.content ?: "",
+                    title = s["name"]?.jsonPrimitive?.content ?: "",
+                    artist = s["singers"]?.jsonArray?.get(0)?.jsonObject?.get("name")?.jsonPrimitive?.content ?: "Unknown",
+                    album = s["albums"]?.jsonArray?.get(0)?.jsonObject?.get("name")?.jsonPrimitive?.content,
+                    durationMs = null,
+                    coverUrl = s["imgItems"]?.jsonArray?.get(0)?.jsonObject?.get("img")?.jsonPrimitive?.content,
+                    source = "migu"
+                )
+            }
+        }
+
+        // 2. 尝试代理搜索
+        for (p in proxies) {
+            val result = runCatching {
+                if (p.contains("paugram") || p.contains("v0.pw")) {
+                    val resp: String = client.get(p) {
+                        url {
+                            parameters.append("source", "migu")
+                            parameters.append("name", q)
+                        }
+                    }.body()
+                    val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
+                    val list = if (json is JsonArray) json else json.jsonObject["list"]?.jsonArray ?: emptyJsonArray
+                    list.map { it.jsonObject }
+                } else if (p.contains("liuzhijin")) {
+                    val resp: String = client.get(p) {
+                        url {
+                            parameters.append("type", "search")
+                            parameters.append("word", q)
+                            parameters.append("source", "migu")
+                        }
+                    }.body()
+                    val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
+                    json.jsonObject["data"]?.jsonArray?.map { it.jsonObject } ?: emptyList()
+                } else emptyList()
+            }.getOrNull() ?: emptyList()
+
+            if (result.isNotEmpty()) {
+                return result.map { s ->
+                    Track(
+                        id = s["id"]?.jsonPrimitive?.content ?: s["copyrightId"]?.jsonPrimitive?.content ?: "",
+                        title = s["title"]?.jsonPrimitive?.content ?: s["name"]?.jsonPrimitive?.content ?: s["songName"]?.jsonPrimitive?.content ?: "",
+                        artist = s["artist"]?.jsonPrimitive?.content ?: s["singerName"]?.jsonPrimitive?.content ?: "Unknown",
+                        album = s["album"]?.jsonPrimitive?.content ?: s["albumName"]?.jsonPrimitive?.content,
+                        durationMs = null,
+                        coverUrl = s["cover"]?.jsonPrimitive?.content ?: s["pic"]?.jsonPrimitive?.content,
+                        source = "migu"
+                    )
+                }
+            }
+        }
+
+        return emptyList()
+    }
+
+    private val emptyJsonArray = JsonArray(emptyList())
+
+    override suspend fun streamUrl(id: String): String {
+        // 1. 尝试直连 listenFree 接口 (低音质通常可用)
+        val directUrl = "https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/sub/listenFree?contentId=$id&resourceType=2&quality=1"
+        val check = runCatching {
+            client.head(directUrl) {
+                header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1")
+            }.status.value == 200
+        }.getOrNull() ?: false
+        if (check) return directUrl
+
+        // 2. 尝试代理接口
+        val proxies = listOf(
+            "https://api.paugram.com/music",
+            "https://api.liuzhijin.cn",
+            "https://api.v0.pw/music"
+        )
+        for (p in proxies) {
+            val url = runCatching {
+                if (p.contains("paugram") || p.contains("v0.pw")) {
+                    val resp: String = client.get(p) {
+                        parameter("source", "migu")
+                        parameter("id", id)
+                    }.body()
+                    val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
+                    json.jsonObject["url"]?.jsonPrimitive?.content ?: json.jsonObject["play_url"]?.jsonPrimitive?.content
+                } else if (p.contains("liuzhijin")) {
+                    val resp: String = client.get(p) {
+                        parameter("type", "url")
+                        parameter("id", id)
+                        parameter("source", "migu")
+                    }.body()
+                    val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
+                    json.jsonObject["data"]?.jsonObject?.get("url")?.jsonPrimitive?.content
+                } else null
+            }.getOrNull()
+            if (!url.isNullOrBlank() && url.startsWith("http")) return url
+        }
+
+        // 3. 最后保底使用 contentId 构造 (可能 404，但作为最后尝试)
+        return "https://freetyst.nf.migu.cn/MIGUM2.0/v1.0/content/sub/listenFree?contentId=$id&resourceType=2&quality=1"
+    }
+
+    override suspend fun lyrics(id: String): String? = null
+}
+
+@Serializable
+data class MiguSearchResp(val musics: List<MiguMusic>? = null)
+@Serializable
+data class MiguMusic(
+    val id: String? = null,
+    val copyrightId: String? = null,
+    val songName: String? = null,
+    val singerName: String? = null,
+    val albumName: String? = null,
+    val cover: String? = null
+)

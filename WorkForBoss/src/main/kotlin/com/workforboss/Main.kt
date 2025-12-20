@@ -1,16 +1,10 @@
 package com.workforboss
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material.Tab
-import androidx.compose.material.TabRow
-import androidx.compose.material.Text
-import androidx.compose.material.Scaffold
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.*
+import androidx.compose.material.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,9 +19,11 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.rememberWindowState
 import androidx.compose.ui.window.application
+import com.workforboss.music.MusicPlayerTab
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -164,20 +160,70 @@ fun DrawScope.drawBoard(cells: List<Axial>, hexSize: Float, offset: Offset, hove
 @Composable
 fun App() {
     var selected by remember { mutableStateOf(0) }
-    val tabs = listOf("中国跳棋", "页面二", "页面三", "页面四")
-    Scaffold(
-        topBar = {
-            TabRow(selectedTabIndex = selected, modifier = Modifier.fillMaxWidth()) {
-                tabs.forEachIndexed { index, title ->
-                    Tab(selected = selected == index, onClick = { selected = index }, text = { Text(title) })
+    val tabs = listOf("音乐播放器", "中国跳棋", "页面三", "页面四")
+    
+    // 高级感配色方案 (深色调但非纯黑)
+    val premiumDarkColors = darkColors(
+        primary = Color(0xFFD0BCFF),       // 柔和紫
+        primaryVariant = Color(0xFF381E72),
+        secondary = Color(0xFFCCC2DC),
+        background = Color(0xFF1A1C1E),    // 深炭灰
+        surface = Color(0xFF2D2F31),       // 浅炭灰
+        onPrimary = Color(0xFF381E72),
+        onSecondary = Color(0xFF332D41),
+        onBackground = Color(0xFFE2E2E6),
+        onSurface = Color(0xFFE2E2E6)
+    )
+
+    MaterialTheme(colors = premiumDarkColors) {
+        Scaffold(
+            backgroundColor = MaterialTheme.colors.background,
+            topBar = {
+                Surface(elevation = 8.dp) {
+                    TabRow(
+                        selectedTabIndex = selected,
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        backgroundColor = MaterialTheme.colors.surface,
+                        contentColor = MaterialTheme.colors.primary,
+                        indicator = { tabPositions ->
+                            TabRowDefaults.Indicator(
+                                Modifier.tabIndicatorOffset(tabPositions[selected]),
+                                height = 3.dp,
+                                color = MaterialTheme.colors.primary
+                            )
+                        },
+                        divider = {} // 去掉底部分割线，更高级
+                    ) {
+                        tabs.forEachIndexed { index, title ->
+                            val isSelected = selected == index
+                            Tab(
+                                selected = isSelected,
+                                onClick = { selected = index },
+                                text = {
+                                    Text(
+                                        title,
+                                        style = MaterialTheme.typography.button.copy(
+                                            fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
+                                            letterSpacing = 1.sp
+                                        )
+                                    )
+                                },
+                                selectedContentColor = MaterialTheme.colors.primary,
+                                unselectedContentColor = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
                 }
             }
-        }
-    ) { innerPadding ->
-        Box(Modifier.fillMaxSize().padding(innerPadding)) {
-            when (selected) {
-                0 -> ChineseCheckersBoard(Modifier.fillMaxSize())
-                else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("待实现") }
+        ) { innerPadding ->
+            Box(Modifier.fillMaxSize().padding(innerPadding).background(MaterialTheme.colors.background)) {
+                when (selected) {
+                    0 -> MusicPlayerTab()
+                    1 -> ChineseCheckersBoard(Modifier.fillMaxSize())
+                    else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { 
+                        Text("待实现", color = MaterialTheme.colors.onSurface.copy(alpha = 0.4f)) 
+                    }
+                }
             }
         }
     }
