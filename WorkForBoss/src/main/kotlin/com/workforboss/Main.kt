@@ -276,19 +276,18 @@ fun main() = application {
     val trayState = rememberTrayState()
     val appIcon = painterResource("icon.png")
 
-    if (isVisible) {
-        Window(
-            onCloseRequest = { isVisible = false },
-            title = "WorkForBoss",
-            icon = appIcon,
-            state = rememberWindowState(
-                position = WindowPosition(x.dp, y.dp),
-                width = windowWidth.dp,
-                height = windowHeight.dp
-            )
-        ) {
-            App()
-        }
+    Window(
+        onCloseRequest = { isVisible = false },
+        title = "WorkForBoss",
+        icon = appIcon,
+        visible = isVisible,
+        state = rememberWindowState(
+            position = WindowPosition(x.dp, y.dp),
+            width = windowWidth.dp,
+            height = windowHeight.dp
+        )
+    ) {
+        App()
     }
 
     Tray(

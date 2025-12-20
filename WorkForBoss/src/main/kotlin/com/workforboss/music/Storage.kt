@@ -23,7 +23,14 @@ object Storage {
     fun getMusicFile(source: String, id: String): File {
         // 按照 来源/ID.mp3 存储，确保唯一性
         val sourceDir = File(musicDir, source).apply { if (!exists()) mkdirs() }
-        return File(sourceDir, "$id.mp3")
+        // 如果是本地音乐，ID 可能已经包含了扩展名，或者我们统一使用 ID
+        return if (source == "local") {
+            // 检查是否已经有扩展名，如果没有则补充
+            if (id.contains(".")) File(sourceDir, id)
+            else File(sourceDir, "$id.mp3")
+        } else {
+            File(sourceDir, "$id.mp3")
+        }
     }
 
     fun loadLibrary(): LibraryState {

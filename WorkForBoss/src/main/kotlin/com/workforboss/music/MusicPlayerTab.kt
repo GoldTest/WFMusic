@@ -62,7 +62,7 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
     val focusRequester = remember { FocusRequester() }
 
     // 分平台搜索状态
-    val sources = listOf("all", "netease", "qq", "kugou", "kuwo", "migu", "itunes")
+    val sources = listOf("all", "local", "netease", "qq", "kugou", "kuwo", "migu", "itunes")
     var selectedTab by remember { mutableStateOf(0) }
     val sourceResults = remember { mutableStateMapOf<String, List<Track>>() }
     val sourceLoading = remember { mutableStateMapOf<String, Boolean>() }
@@ -240,11 +240,58 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                     Column(Modifier.fillMaxSize().padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                "搜索结果",
+                                if (sources[selectedTab] == "local") "本地音乐管理" else "搜索结果",
                                 style = MaterialTheme.typography.h6,
                                 color = MaterialTheme.colors.primary
                             )
                             Spacer(Modifier.weight(1f))
+                            if (sources[selectedTab] == "local") {
+                                Button(
+                                    onClick = {
+                                        val chooser = JFileChooser().apply {
+                                            isMultiSelectionEnabled = true
+                                            fileFilter = javax.swing.filechooser.FileNameExtensionFilter("音乐文件", "mp3", "wav", "flac", "m4a")
+                                        }
+                                        val res = chooser.showOpenDialog(null)
+                                        if (res == JFileChooser.APPROVE_OPTION) {
+                                            val files = chooser.selectedFiles
+                                            scope.launch(Dispatchers.IO) {
+                                                 var count = 0
+                                                 files.forEach { file ->
+                                                     runCatching {
+                                                         val id = "local_${System.currentTimeMillis()}_${file.name.hashCode()}.${file.extension}"
+                                                         val targetFile = Storage.getMusicFile("local", id)
+                                                         // 移动文件
+                                                         java.nio.file.Files.move(file.toPath(), targetFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                                                         
+                                                         val track = LocalTrack(
+                                                             id = id,
+                                                             path = targetFile.absolutePath,
+                                                             title = file.nameWithoutExtension,
+                                                             artist = "本地歌手",
+                                                             album = "本地专辑",
+                                                             durationMillis = 0L
+                                                         )
+                                                         library = PlaylistManager.addLocalTrack(track, library)
+                                                         count++
+                                                     }.onFailure {
+                                                         msg = "添加失败: ${file.name} - ${it.message}"
+                                                     }
+                                                 }
+                                                 Storage.saveLibrary(library)
+                                                 msg = "成功添加 $count 首本地音乐"
+                                             }
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(20.dp),
+                                    modifier = Modifier.height(32.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("添加本地音乐", style = MaterialTheme.typography.caption)
+                                }
+                            }
                             if (searchLoading) {
                                 CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                             }
@@ -253,61 +300,64 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                         Spacer(Modifier.height(8.dp))
                         
                         // 平台切换 Tab (优化样式)
-                        ScrollableTabRow(
-                            selectedTabIndex = selectedTab,
-                            backgroundColor = Color.Transparent,
-                            contentColor = MaterialTheme.colors.primary,
-                            edgePadding = 0.dp,
-                            indicator = { tabPositions ->
-                                TabRowDefaults.Indicator(
-                                    Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                                    height = 2.dp,
-                                    color = MaterialTheme.colors.primary
+                        val tabScroll = rememberScrollState()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(tabScroll)
+                                .draggable(
+                                    orientation = Orientation.Horizontal,
+                                    state = rememberDraggableState { delta ->
+                                        scope.launch {
+                                            tabScroll.scrollTo(tabScroll.value - delta.toInt())
+                                        }
+                                    }
                                 )
-                            },
-                            divider = {}
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             sources.forEachIndexed { index, name ->
                                 val isSelected = selectedTab == index
-                                Tab(
-                                    selected = isSelected,
+                                OutlinedButton(
                                     onClick = { selectedTab = index },
-                                    text = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                name.uppercase(),
-                                                style = MaterialTheme.typography.caption.copy(
-                                                    fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal
-                                                )
+                                    modifier = Modifier.padding(end = 4.dp),
+                                    shape = RoundedCornerShape(20.dp),
+                                    colors = if (isSelected) ButtonDefaults.outlinedButtonColors(backgroundColor = MaterialTheme.colors.primary.copy(alpha = 0.1f)) else ButtonDefaults.outlinedButtonColors()
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            if (isSelected) "● ${name.uppercase()}" else name.uppercase(),
+                                            style = MaterialTheme.typography.caption.copy(
+                                                fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal
                                             )
-                                            val count = sourceResults[name]?.size ?: 0
-                                            if (count > 0 || sourceLoading[name] == true) {
-                                                Spacer(Modifier.width(6.dp))
-                                                Surface(
-                                                    color = if (isSelected) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface.copy(alpha = 0.12f),
-                                                    shape = RoundedCornerShape(10.dp)
-                                                ) {
-                                                    if (sourceLoading[name] == true) {
-                                                        CircularProgressIndicator(
-                                                            modifier = Modifier.padding(horizontal = 4.dp).size(10.dp),
-                                                            strokeWidth = 1.5.dp,
-                                                            color = if (isSelected) MaterialTheme.colors.onPrimary else MaterialTheme.colors.primary
+                                        )
+                                        val count = if (name == "local") library.localTracks.size else (sourceResults[name]?.size ?: 0)
+                                        if (count > 0 || (name != "local" && sourceLoading[name] == true)) {
+                                            Spacer(Modifier.width(6.dp))
+                                            Surface(
+                                                color = if (isSelected) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface.copy(alpha = 0.12f),
+                                                shape = RoundedCornerShape(10.dp)
+                                            ) {
+                                                if (sourceLoading[name] == true) {
+                                                    CircularProgressIndicator(
+                                                        modifier = Modifier.padding(horizontal = 4.dp).size(10.dp),
+                                                        strokeWidth = 1.5.dp,
+                                                        color = if (isSelected) MaterialTheme.colors.onPrimary else MaterialTheme.colors.primary
+                                                    )
+                                                } else {
+                                                    Text(
+                                                        count.toString(),
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                                        style = MaterialTheme.typography.overline.copy(
+                                                            color = if (isSelected) MaterialTheme.colors.onPrimary else MaterialTheme.colors.onSurface,
+                                                            fontSize = 9.sp
                                                         )
-                                                    } else {
-                                                        Text(
-                                                            count.toString(),
-                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-                                                            style = MaterialTheme.typography.overline.copy(
-                                                                color = if (isSelected) MaterialTheme.colors.onPrimary else MaterialTheme.colors.onSurface,
-                                                                fontSize = 9.sp
-                                                            )
-                                                        )
-                                                    }
+                                                    )
                                                 }
                                             }
                                         }
                                     }
-                                )
+                                }
                             }
                         }
 
@@ -339,26 +389,47 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                         }
 
                         LazyColumn(Modifier.fillMaxSize()) {
-                            items(currentResults) { t ->
-                                SearchResultItem(
-                                    t = t,
-                                    chain = chain,
-                                    player = player,
-                                    scope = scope,
-                                    library = library,
-                                    onTrackSelect = { cover ->
-                                        coverUrl = cover
-                                    },
-                                    onLibraryUpdate = {
-                                        library = it
-                                        Storage.saveLibrary(it)
-                                    },
-                                    onMsg = { msg = it },
-                                    onClearPlayingContext = {
-                                        playingPlaylistId = null
-                                        playingIndex = -1
-                                    }
-                                )
+                            if (sources[selectedTab] == "local") {
+                                items(library.localTracks) { lt ->
+                                    LocalTrackItem(
+                                        lt = lt,
+                                        player = player,
+                                        scope = scope,
+                                        library = library,
+                                        onLibraryUpdate = {
+                                            library = it
+                                            Storage.saveLibrary(it)
+                                        },
+                                        onMsg = { msg = it },
+                                        onTrackSelect = { coverUrl = it },
+                                        onClearPlayingContext = {
+                                            playingPlaylistId = null
+                                            playingIndex = -1
+                                        }
+                                    )
+                                }
+                            } else {
+                                items(currentResults) { t ->
+                                    SearchResultItem(
+                                        t = t,
+                                        chain = chain,
+                                        player = player,
+                                        scope = scope,
+                                        library = library,
+                                        onTrackSelect = { cover ->
+                                            coverUrl = cover
+                                        },
+                                        onLibraryUpdate = {
+                                            library = it
+                                            Storage.saveLibrary(it)
+                                        },
+                                        onMsg = { msg = it },
+                                        onClearPlayingContext = {
+                                            playingPlaylistId = null
+                                            playingIndex = -1
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -538,6 +609,94 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                     TextButton(onClick = { showRenameDialog = null }) { Text("取消") }
                 }
             )
+        }
+    }
+}
+
+@Composable
+private fun LocalTrackItem(
+    lt: LocalTrack,
+    player: AudioPlayer,
+    scope: kotlinx.coroutines.CoroutineScope,
+    library: LibraryState,
+    onTrackSelect: (String?) -> Unit,
+    onLibraryUpdate: (LibraryState) -> Unit,
+    onMsg: (String) -> Unit,
+    onClearPlayingContext: () -> Unit
+) {
+    var showAddMenu by remember { mutableStateOf(false) }
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        elevation = 2.dp,
+        shape = RoundedCornerShape(12.dp),
+        backgroundColor = MaterialTheme.colors.surface
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colors.primary.copy(alpha = 0.1f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.List, null, tint = MaterialTheme.colors.primary)
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(lt.title ?: "未知标题", style = MaterialTheme.typography.subtitle1, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${lt.artist ?: "未知歌手"} • ${lt.album ?: "未知专辑"}", style = MaterialTheme.typography.caption, color = Color.Gray)
+            }
+            
+            IconButton(onClick = {
+                onClearPlayingContext()
+                scope.launch {
+                    player.loadLocal(lt)
+                    player.play()
+                }
+                onTrackSelect(null)
+            }) {
+                Icon(Icons.Default.PlayArrow, "Play", tint = MaterialTheme.colors.primary)
+            }
+            
+            Box {
+                IconButton(onClick = { showAddMenu = true }) {
+                    Icon(Icons.Default.Add, "Add to Playlist")
+                }
+                DropdownMenu(expanded = showAddMenu, onDismissRequest = { showAddMenu = false }) {
+                    if (library.playlists.isEmpty()) {
+                        DropdownMenuItem(onClick = { showAddMenu = false }) {
+                            Text("暂无播放列表", style = MaterialTheme.typography.caption)
+                        }
+                    }
+                    library.playlists.forEach { p ->
+                        DropdownMenuItem(onClick = {
+                            val item = MusicItemId(
+                                id = lt.id,
+                                source = "local",
+                                title = lt.title ?: "未知",
+                                artist = lt.artist ?: "未知",
+                                album = lt.album,
+                                durationMs = lt.durationMillis
+                            )
+                            onLibraryUpdate(PlaylistManager.addToPlaylist(p.id, item, library))
+                            onMsg("已添加到: ${p.name}")
+                            showAddMenu = false
+                        }) {
+                            Text(p.name)
+                        }
+                    }
+                }
+            }
+
+            IconButton(onClick = {
+                onLibraryUpdate(PlaylistManager.removeLocalTrack(lt.id, library))
+                onMsg("已从本地列表移除")
+            }) {
+                Icon(Icons.Default.Delete, "Delete", tint = Color.Red.copy(alpha = 0.6f))
+            }
         }
     }
 }

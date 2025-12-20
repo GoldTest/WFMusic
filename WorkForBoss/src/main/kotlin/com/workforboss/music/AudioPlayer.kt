@@ -9,9 +9,9 @@ import java.io.File
 import java.io.FileInputStream
 import java.net.URI
 import java.net.URL
-import javax.sound.sampled.AudioSystem
-import javax.sound.sampled.FloatControl
-import javax.sound.sampled.Port
+import javazoom.jl.player.AudioDevice
+import javazoom.jl.player.FactoryRegistry
+import javazoom.jl.decoder.Decoder
 
 class AudioPlayer {
     private var player: Player? = null
@@ -34,61 +34,40 @@ class AudioPlayer {
     private var contentLength: Long? = null
     private var currentVolume: Float = 0.8f
 
+    // 内部类实现软件音量控制
+    private inner class SoftwareVolumeAudioDevice : AudioDevice {
+        private val delegate: AudioDevice = FactoryRegistry.systemRegistry().createAudioDevice()
+        
+        override fun open(decoder: Decoder?) = delegate.open(decoder)
+        override fun close() = delegate.close()
+        override fun isOpen(): Boolean = delegate.isOpen
+        override fun getPosition(): Int = delegate.position
+        override fun flush() = delegate.flush()
+        
+        override fun write(samples: ShortArray?, offs: Int, len: Int) {
+            if (samples != null) {
+                val vol = currentVolume
+                if (vol < 0.99f) {
+                    for (i in offs until (offs + len)) {
+                        // 软件缩放采样值
+                        val scaled = (samples[i] * vol).toInt()
+                        samples[i] = scaled.coerceIn(-32768, 32767).toShort()
+                    }
+                }
+            }
+            delegate.write(samples, offs, len)
+        }
+    }
+
     fun setVolume(p: Int) {
-        currentVolume = p / 100f
-        updateDeviceVolume()
+        currentVolume = (p / 100f).coerceIn(0f, 1f)
+        // 采用软件音量控制，这样绝对不会影响系统主音量，且能实现独立控制
+        // 不再调用 updateDeviceVolume() 以免触发某些驱动下的系统音量联动
     }
 
     private fun updateDeviceVolume() {
-        try {
-            val p = player ?: return
-            
-            // 方案 1: 尝试通过反射 JLayer 的 device -> line 设置音量 (针对 SourceDataLine)
-            try {
-                val deviceField = p.javaClass.getDeclaredField("device")
-                deviceField.isAccessible = true
-                val device = deviceField.get(p)
-                
-                val lineField = device.javaClass.getDeclaredField("line")
-                lineField.isAccessible = true
-                val line = lineField.get(device) as? javax.sound.sampled.SourceDataLine
-                
-                if (line != null && line.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
-                    val gainControl = line.getControl(FloatControl.Type.MASTER_GAIN) as FloatControl
-                    val volume = currentVolume.coerceIn(0.0001f, 1f)
-                    val dB = (Math.log10(volume.toDouble()) * 20.0).toFloat()
-                    gainControl.value = dB.coerceIn(gainControl.minimum, gainControl.maximum)
-                    return // 成功设置，退出
-                }
-            } catch (e: Exception) {
-                // 方案 1 失败，尝试方案 2
-            }
-
-            // 方案 2: 尝试直接控制系统的 MASTER_GAIN (针对某些系统环境)
-            try {
-                val mixers = AudioSystem.getMixerInfo()
-                for (mixerInfo in mixers) {
-                    val mixer = AudioSystem.getMixer(mixerInfo)
-                    val lineInfos = mixer.sourceLineInfo
-                    for (lineInfo in lineInfos) {
-                        val line = mixer.getLine(lineInfo)
-                        if (line is javax.sound.sampled.SourceDataLine && line.isOpen) {
-                            if (line.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
-                                val gainControl = line.getControl(FloatControl.Type.MASTER_GAIN) as FloatControl
-                                val volume = currentVolume.coerceIn(0.0001f, 1f)
-                                val dB = (Math.log10(volume.toDouble()) * 20.0).toFloat()
-                                gainControl.value = dB.coerceIn(gainControl.minimum, gainControl.maximum)
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                println("Failed to set volume via Mixer: ${e.message}")
-            }
-
-        } catch (e: Exception) {
-            println("Failed to set volume: ${e.message}")
-        }
+        // 由于采用了 SoftwareVolumeAudioDevice 软件音量控制，
+        // 我们不再需要通过硬件 Line 来调整音量，从而避免影响系统全局音量。
     }
 
     suspend fun loadOnline(track: OnlineTrack) {
@@ -145,14 +124,8 @@ class AudioPlayer {
                 }
 
                 val bufferedStream = java.io.BufferedInputStream(inputStream)
-                val p = Player(bufferedStream)
+                val p = Player(bufferedStream, SoftwareVolumeAudioDevice())
                 player = p
-                
-                // 延迟一小会儿等待 JLayer 初始化底层音频设备
-                scope.launch {
-                    delay(500)
-                    updateDeviceVolume()
-                }
                 
                 _isPlaying.value = true
                 _error.value = null

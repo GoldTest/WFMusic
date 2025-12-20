@@ -50,5 +50,15 @@ object PlaylistManager {
         val newHist = (listOf(hist) + state.playHistory).take(200)
         return state.copy(playHistory = newHist)
     }
+
+    fun addLocalTrack(track: LocalTrack, state: LibraryState): LibraryState {
+        // 避免重复添加同一路径的歌曲
+        if (state.localTracks.any { it.path == track.path }) return state
+        return state.copy(localTracks = state.localTracks + track)
+    }
+
+    fun removeLocalTrack(id: String, state: LibraryState): LibraryState {
+        return state.copy(localTracks = state.localTracks.filterNot { it.id == id })
+    }
 }
 
