@@ -29,16 +29,12 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-        shell: bash
-
       - name: Build with Gradle
-        run: ./gradlew build
+        run: .\gradlew.bat build
 
       - name: Package Windows Artifacts
         if: startsWith(github.ref, 'refs/tags/v')
-        run: ./gradlew packageExe packageMsi
+        run: .\gradlew.bat packageExe packageMsi
 
       - name: Create Release and Upload Assets
         if: startsWith(github.ref, 'refs/tags/v')
