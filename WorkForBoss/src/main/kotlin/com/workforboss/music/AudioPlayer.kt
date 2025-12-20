@@ -7,6 +7,7 @@ import javazoom.jl.player.Player
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
+import java.net.URI
 import java.net.URL
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.FloatControl
@@ -99,7 +100,7 @@ class AudioPlayer {
         // Try to get content length for seeking
         withContext(Dispatchers.IO) {
             runCatching {
-                val conn = java.net.URL(track.previewUrl).openConnection()
+                val conn = URI(track.previewUrl).toURL().openConnection()
                 contentLength = conn.contentLengthLong.takeIf { it > 0 }
             }
         }
@@ -120,7 +121,7 @@ class AudioPlayer {
         playerJob = scope.launch {
             try {
                 val inputStream = if (path.startsWith("http")) {
-                    val conn = java.net.URL(path).openConnection()
+                    val conn = URI(path).toURL().openConnection()
                     conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
                     if (path.contains("qqmusic") || path.contains("qq.com")) {
                         conn.setRequestProperty("Referer", "https://y.qq.com/")

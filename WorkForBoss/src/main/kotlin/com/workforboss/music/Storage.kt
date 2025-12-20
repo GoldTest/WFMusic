@@ -2,6 +2,7 @@ package com.workforboss.music
 
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -39,7 +40,7 @@ object Storage {
         if (target.exists()) return
         val tmp = File.createTempFile("download", ".tmp", cacheDir)
         try {
-            val conn = java.net.URL(url).openConnection()
+            val conn = URI(url).toURL().openConnection()
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
             if (url.contains("qqmusic") || url.contains("qq.com")) {
                 conn.setRequestProperty("Referer", "https://y.qq.com/")
@@ -76,5 +77,13 @@ object Storage {
         return runCatching {
             Files.move(f.toPath(), File(toDir, f.name).toPath(), StandardCopyOption.REPLACE_EXISTING)
         }.isSuccess
+    }
+
+    fun deleteLocalTrackFile(path: String): Boolean {
+        val f = File(path)
+        if (f.exists()) {
+            return f.delete()
+        }
+        return false
     }
 }
