@@ -5,29 +5,16 @@ Thumbs.db
 *.swp
 *.swo
 
-/build 
+# Build and IDE files
 /build/
-//build/
-*build
-.build
-
-# Node/Web projects
-server/node_modules/
-server/dist/
-web/node_modules/
-web/dist/
-
+.gradle/
 .idea/
 *.iml
 .vscode/
-
-.gradle/
-**/build/
 out/
 bin/
 *.class
-.gradle
 
+# Gradle wrapper
 !.gradle/wrapper/gradle-wrapper.jar
 !**/gradle/wrapper/gradle-wrapper.jar
-

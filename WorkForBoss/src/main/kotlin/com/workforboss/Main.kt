@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.rememberWindowState
@@ -30,6 +31,9 @@ import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.inset
 import java.awt.Toolkit
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ArrowBack
 import com.workforboss.music.MusicPlayerTab
 import kotlin.math.PI
 import kotlin.math.cos
@@ -166,16 +170,15 @@ fun DrawScope.drawBoard(cells: List<Axial>, hexSize: Float, offset: Offset, hove
 
 @Composable
 fun App() {
-    var selected by remember { mutableStateOf(0) }
-    val tabs = listOf("音乐播放器", "中国跳棋", "页面三", "页面四")
+    var showSettings by remember { mutableStateOf(false) }
     
-    // 高级感配色方案 (深色调但非纯黑)
+    // 高级感配色方案
     val premiumDarkColors = darkColors(
-        primary = Color(0xFFD0BCFF),       // 柔和紫
+        primary = Color(0xFFD0BCFF),
         primaryVariant = Color(0xFF381E72),
         secondary = Color(0xFFCCC2DC),
-        background = Color(0xFF1A1C1E),    // 深炭灰
-        surface = Color(0xFF2D2F31),       // 浅炭灰
+        background = Color(0xFF1A1C1E),
+        surface = Color(0xFF2D2F31),
         onPrimary = Color(0xFF381E72),
         onSecondary = Color(0xFF332D41),
         onBackground = Color(0xFFE2E2E6),
@@ -183,52 +186,76 @@ fun App() {
     )
 
     MaterialTheme(colors = premiumDarkColors) {
-        Scaffold(
-            backgroundColor = MaterialTheme.colors.background,
-            topBar = {
-                Surface(elevation = 8.dp) {
-                    TabRow(
-                        selectedTabIndex = selected,
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        backgroundColor = MaterialTheme.colors.surface,
-                        contentColor = MaterialTheme.colors.primary,
-                        indicator = { tabPositions ->
-                            TabRowDefaults.Indicator(
-                                Modifier.tabIndicatorOffset(tabPositions[selected]),
-                                height = 3.dp,
-                                color = MaterialTheme.colors.primary
-                            )
-                        },
-                        divider = {} // 去掉底部分割线，更高级
-                    ) {
-                        tabs.forEachIndexed { index, title ->
-                            val isSelected = selected == index
-                            Tab(
-                                selected = isSelected,
-                                onClick = { selected = index },
-                                text = {
-                                    Text(
-                                        title,
-                                        style = MaterialTheme.typography.button.copy(
-                                            fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
-                                            letterSpacing = 1.sp
-                                        )
-                                    )
-                                },
-                                selectedContentColor = MaterialTheme.colors.primary,
-                                unselectedContentColor = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
-                            )
-                        }
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colors.background)) {
+            // 音乐播放器作为底层主视图，始终存在以维持状态
+            MusicPlayerTab(onNavigateToSettings = { showSettings = true })
+
+            // 设置页覆盖在主视图之上
+            if (showSettings) {
+                SettingsView(onClose = { showSettings = false })
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsView(onClose: () -> Unit) {
+    var selectedTab by remember { mutableStateOf(0) }
+    val tabs = listOf("通用", "跳棋", "关于")
+
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colors.background
+    ) {
+        Column {
+            TopAppBar(
+                title = { Text("设置") },
+                navigationIcon = {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.Default.ArrowBack, "返回")
                     }
+                },
+                backgroundColor = MaterialTheme.colors.surface,
+                elevation = 4.dp
+            )
+
+            TabRow(
+                selectedTabIndex = selectedTab,
+                backgroundColor = MaterialTheme.colors.surface,
+                contentColor = MaterialTheme.colors.primary,
+                indicator = { tabPositions ->
+                    TabRowDefaults.Indicator(
+                        Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                        height = 3.dp,
+                        color = MaterialTheme.colors.primary
+                    )
+                }
+            ) {
+                tabs.forEachIndexed { index, title ->
+                    Tab(
+                        selected = selectedTab == index,
+                        onClick = { selectedTab = index },
+                        text = { Text(title) },
+                        selectedContentColor = MaterialTheme.colors.primary,
+                        unselectedContentColor = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                    )
                 }
             }
-        ) { innerPadding ->
-            Box(Modifier.fillMaxSize().padding(innerPadding).background(MaterialTheme.colors.background)) {
-                when (selected) {
-                    0 -> MusicPlayerTab()
+
+            Box(Modifier.fillMaxSize().padding(16.dp)) {
+                when (selectedTab) {
+                    0 -> Column {
+                        Text("应用设置", style = MaterialTheme.typography.h6)
+                        Spacer(Modifier.height(16.dp))
+                        Text("这里可以放置音质选择、下载路径设置等...", color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f))
+                    }
                     1 -> ChineseCheckersBoard(Modifier.fillMaxSize())
-                    else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { 
-                        Text("待实现", color = MaterialTheme.colors.onSurface.copy(alpha = 0.4f)) 
+                    2 -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                        Spacer(Modifier.height(32.dp))
+                        Text("WorkForBoss", style = MaterialTheme.typography.h5, color = MaterialTheme.colors.primary)
+                        Text("版本 0.1.0", style = MaterialTheme.typography.caption)
+                        Spacer(Modifier.height(16.dp))
+                        Text("一个极简且高级的音乐播放器", style = MaterialTheme.typography.body1)
                     }
                 }
             }

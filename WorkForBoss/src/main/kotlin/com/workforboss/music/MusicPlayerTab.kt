@@ -48,13 +48,13 @@ import io.kamel.image.asyncPainterResource
 import androidx.compose.ui.layout.ContentScale
 
 @Composable
-fun MusicPlayerTab() {
+fun MusicPlayerTab(onNavigateToSettings: () -> Unit) {
     // 继承 Main.kt 的主题色，不在此处重新定义 darkColors，除非需要局部覆盖
-    MusicPlayerContent()
+    MusicPlayerContent(onNavigateToSettings)
 }
 
 @Composable
-private fun MusicPlayerContent() {
+private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
     val scope = rememberCoroutineScope()
     val chain = remember { SourceChain() }
     var searchText by remember { mutableStateOf("") }
@@ -169,7 +169,10 @@ private fun MusicPlayerContent() {
 
     // 提取搜索逻辑为函数
     val performSearch = {
-        if (searchText.isNotBlank() && !searchLoading) {
+        if (searchText.trim() == "设置") {
+            onNavigateToSettings()
+            searchText = ""
+        } else if (searchText.isNotBlank() && !searchLoading) {
             scope.launch(Dispatchers.IO) {
                 searchLoading = true
                 msg = null
@@ -208,10 +211,10 @@ private fun MusicPlayerContent() {
             Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = searchText, onValueChange = { searchText = it },
-                    label = { Text("搜索歌曲/歌手/专辑") },
+                    label = { Text("搜索歌曲/歌手/专辑 (输入 '设置' 快速跳转)") },
                     singleLine = true,
                     modifier = Modifier
-                        .weight(1f)
+                        .fillMaxWidth()
                         .focusRequester(focusRequester)
                         .onPreviewKeyEvent { event ->
                             if (event.key == Key.Enter && event.type == KeyEventType.KeyDown) {
@@ -222,11 +225,6 @@ private fun MusicPlayerContent() {
                             }
                         }
                 )
-                Spacer(Modifier.width(8.dp))
-                Button(enabled = !searchLoading, onClick = { performSearch() }) { 
-                    Text(if (searchLoading) "搜索中..." else "全平台搜索") 
-                }
-                // 移除了手动切换主题按钮，因为 Main.kt 已经统一了主题
             }
         }
     ) { inner ->
