@@ -1,0 +1,54 @@
+name: Windows Build & Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+        shell: bash
+
+      - name: Build with Gradle
+        run: ./gradlew build
+
+      - name: Package Windows Artifacts
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: ./gradlew packageExe packageMsi
+
+      - name: Create Release and Upload Assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/compose/binaries/main/exe/*.exe
+            build/compose/binaries/main/msi/*.msi
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
