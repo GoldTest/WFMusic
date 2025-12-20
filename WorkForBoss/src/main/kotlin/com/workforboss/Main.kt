@@ -21,6 +21,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.rememberWindowState
@@ -273,50 +274,13 @@ fun main() = application {
 
     var isVisible by remember { mutableStateOf(true) }
     val trayState = rememberTrayState()
-    
-    // 自定义绘制托盘图标：一个圆圈中间带个音符/播放按钮的形状
-    val iconColor = Color(0xFF4CAF50) // 鲜艳的绿色
-    val icon = remember {
-        object : Painter() {
-            override val intrinsicSize: Size = Size(256f, 256f)
-            override fun DrawScope.onDraw() {
-                val padding = size.width * 0.1f
-                inset(padding, padding) {
-                    // 绘制外圆
-                     drawCircle(
-                         color = iconColor,
-                         radius = size.width / 2f,
-                         style = Stroke(width = size.width * 0.1f)
-                     )
-                     // 绘制音符形状
-                     val notePath = Path().apply {
-                         // 音符头部 (左下圆圈)
-                         addOval(androidx.compose.ui.geometry.Rect(
-                             left = size.width * 0.25f,
-                             top = size.height * 0.55f,
-                             right = size.width * 0.5f,
-                             bottom = size.height * 0.8f
-                         ))
-                         // 音符杆 (向上竖线)
-                         moveTo(size.width * 0.5f, size.height * 0.65f)
-                         lineTo(size.width * 0.5f, size.height * 0.25f)
-                         // 音符符尾 (向右横线/斜线)
-                         lineTo(size.width * 0.75f, size.height * 0.35f)
-                     }
-                     drawPath(
-                         path = notePath,
-                         color = iconColor,
-                         style = Stroke(width = size.width * 0.1f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                     )
-                 }
-            }
-        }
-    }
+    val appIcon = painterResource("icon.png")
 
     if (isVisible) {
         Window(
             onCloseRequest = { isVisible = false },
             title = "WorkForBoss",
+            icon = appIcon,
             state = rememberWindowState(
                 position = WindowPosition(x.dp, y.dp),
                 width = windowWidth.dp,
@@ -329,7 +293,7 @@ fun main() = application {
 
     Tray(
         state = trayState,
-        icon = icon,
+        icon = appIcon,
         tooltip = "WorkForBoss",
         onAction = { isVisible = true },
         menu = {
