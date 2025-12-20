@@ -41,12 +41,24 @@ class MiguSource : SourceAdapter {
 
         if (directResult != null && directResult.isNotEmpty()) {
             return directResult.map { s ->
+                val copyrightId = s["copyrightId"]?.jsonPrimitive?.content ?: ""
+                val contentId = s["contentId"]?.jsonPrimitive?.content ?: ""
                 Track(
-                    id = s["copyrightId"]?.jsonPrimitive?.content ?: s["id"]?.jsonPrimitive?.content ?: "",
+                    id = if (contentId.isNotEmpty()) "$copyrightId|$contentId" else copyrightId,
                     title = s["name"]?.jsonPrimitive?.content ?: "",
                     artist = s["singers"]?.jsonArray?.get(0)?.jsonObject?.get("name")?.jsonPrimitive?.content ?: "Unknown",
                     album = s["albums"]?.jsonArray?.get(0)?.jsonObject?.get("name")?.jsonPrimitive?.content,
-                    durationMs = null,
+                    durationMs = s["duration"]?.jsonPrimitive?.content?.toLongOrNull() 
+                        ?: s["length"]?.jsonPrimitive?.content?.toLongOrNull() 
+                        ?: s["time"]?.jsonPrimitive?.content?.let { t ->
+                            // 有些接口返回 "04:30" 格式
+                            if (t.contains(":")) {
+                                val parts = t.split(":")
+                                if (parts.size == 2) {
+                                    (parts[0].toLong() * 60 + parts[1].toLong()) * 1000
+                                } else null
+                            } else t.toLongOrNull()
+                        },
                     coverUrl = s["imgItems"]?.jsonArray?.get(0)?.jsonObject?.get("img")?.jsonPrimitive?.content,
                     source = "migu"
                 )
@@ -86,7 +98,14 @@ class MiguSource : SourceAdapter {
                         title = s["title"]?.jsonPrimitive?.content ?: s["name"]?.jsonPrimitive?.content ?: s["songName"]?.jsonPrimitive?.content ?: "",
                         artist = s["artist"]?.jsonPrimitive?.content ?: s["singerName"]?.jsonPrimitive?.content ?: "Unknown",
                         album = s["album"]?.jsonPrimitive?.content ?: s["albumName"]?.jsonPrimitive?.content,
-                        durationMs = null,
+                        durationMs = s["duration"]?.jsonPrimitive?.content?.toLongOrNull() 
+                            ?: s["length"]?.jsonPrimitive?.content?.toLongOrNull() 
+                            ?: s["time"]?.jsonPrimitive?.content?.let { t ->
+                                if (t.contains(":")) {
+                                    val parts = t.split(":")
+                                    if (parts.size == 2) (parts[0].toLong() * 60 + parts[1].toLong()) * 1000 else null
+                                } else t.toLongOrNull()
+                            },
                         coverUrl = s["cover"]?.jsonPrimitive?.content ?: s["pic"]?.jsonPrimitive?.content,
                         source = "migu"
                     )
@@ -100,45 +119,92 @@ class MiguSource : SourceAdapter {
     private val emptyJsonArray = JsonArray(emptyList())
 
     override suspend fun streamUrl(id: String): String {
-        // 1. 尝试直连 listenFree 接口 (低音质通常可用)
-        val directUrl = "https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/sub/listenFree?contentId=$id&resourceType=2&quality=1"
-        val check = runCatching {
-            client.head(directUrl) {
-                header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1")
-            }.status.value == 200
-        }.getOrNull() ?: false
-        if (check) return directUrl
+        val ids = id.split("|")
+        val copyrightId = ids[0]
+        val contentId = if (ids.size > 1) ids[1] else ""
 
-        // 2. 尝试代理接口
+        // 1. 优先尝试移动端播放接口 (listenSong.do)，它通常能返回带 Key 和 Tim 的完整播放链接
+        if (contentId.isNotEmpty()) {
+            val listenUrl = runCatching {
+                val resp: String = client.get("https://c.musicapp.migu.cn/MIGUM2.0/v1.0/content/listenSong.do") {
+                    parameter("netType", "01")
+                    parameter("resourceType", "E")
+                    parameter("songId", contentId)
+                    parameter("rateType", "1")
+                    header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1")
+                }.body()
+                val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
+                json.jsonObject["url"]?.jsonPrimitive?.content?.let {
+                    if (it.startsWith("//")) "https:$it" else it
+                }
+            }.getOrNull()
+            if (!listenUrl.isNullOrBlank()) return listenUrl
+        }
+
+        // 2. 尝试官方 v3 播放接口 (模拟网页版点击)
+        val v3Url = runCatching {
+            val resp: String = client.get("https://music.migu.cn/v3/api/music/audioPlayer/getPlayInfo") {
+                parameter("dataType", "2")
+                parameter("copyrightId", copyrightId)
+                header("Referer", "https://music.migu.cn/v3/music/player/audio?from=migu")
+                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36")
+            }.body()
+            val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
+            json.jsonObject["data"]?.jsonObject?.get("playUrl")?.jsonPrimitive?.content?.let {
+                if (it.startsWith("//")) "https:$it" else it
+            }
+        }.getOrNull()
+        if (!v3Url.isNullOrBlank()) return v3Url
+
+        // 3. 尝试资源详情接口获取
+        val infoUrl = runCatching {
+            val resp: String = client.get("https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/resourceinfo.do") {
+                parameter("copyrightId", copyrightId)
+                parameter("resourceType", "2")
+                header("Referer", "https://m.music.migu.cn/")
+                header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1")
+            }.body()
+            val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
+            val resource = json.jsonObject["resource"]?.jsonArray?.getOrNull(0)?.jsonObject
+            
+            // 尝试从 rateFormats 中提取 (通常包含免费试听或标准音质)
+            val rateFormats = resource?.get("rateFormats")?.jsonArray
+            val url = rateFormats?.firstOrNull { 
+                val type = it.jsonObject["formatType"]?.jsonPrimitive?.content
+                type == "PQ" || type == "LQ" 
+            }?.jsonObject?.get("url")?.jsonPrimitive?.content
+            
+            url?.replace("ftp://218.200.160.122:21", "https://freetyst.nf.migu.cn")
+               ?.replace("http://", "https://")
+        }.getOrNull()
+        if (!infoUrl.isNullOrBlank()) return infoUrl
+
+        // 4. 兜底尝试代理接口
         val proxies = listOf(
+            "https://api.injahow.cn/meting/",
             "https://api.paugram.com/music",
-            "https://api.liuzhijin.cn",
             "https://api.v0.pw/music"
         )
         for (p in proxies) {
             val url = runCatching {
-                if (p.contains("paugram") || p.contains("v0.pw")) {
+                if (p.contains("injahow.cn")) {
                     val resp: String = client.get(p) {
-                        parameter("source", "migu")
-                        parameter("id", id)
+                        parameter("type", "url"); parameter("id", copyrightId); parameter("source", "migu")
+                    }.body()
+                    val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
+                    json.jsonObject["url"]?.jsonPrimitive?.content
+                } else {
+                    val resp: String = client.get(p) {
+                        parameter("source", "migu"); parameter("id", copyrightId)
                     }.body()
                     val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
                     json.jsonObject["url"]?.jsonPrimitive?.content ?: json.jsonObject["play_url"]?.jsonPrimitive?.content
-                } else if (p.contains("liuzhijin")) {
-                    val resp: String = client.get(p) {
-                        parameter("type", "url")
-                        parameter("id", id)
-                        parameter("source", "migu")
-                    }.body()
-                    val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
-                    json.jsonObject["data"]?.jsonObject?.get("url")?.jsonPrimitive?.content
-                } else null
+                }
             }.getOrNull()
             if (!url.isNullOrBlank() && url.startsWith("http")) return url
         }
 
-        // 3. 最后保底使用 contentId 构造 (可能 404，但作为最后尝试)
-        return "https://freetyst.nf.migu.cn/MIGUM2.0/v1.0/content/sub/listenFree?contentId=$id&resourceType=2&quality=1"
+        return ""
     }
 
     override suspend fun lyrics(id: String): String? = null

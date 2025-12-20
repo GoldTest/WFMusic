@@ -6,6 +6,10 @@ Thumbs.db
 *.swo
 
 /build 
+/build/
+//build/
+*build
+.build
 
 # Node/Web projects
 server/node_modules/

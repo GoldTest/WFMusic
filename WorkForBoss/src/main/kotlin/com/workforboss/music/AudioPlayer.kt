@@ -61,7 +61,15 @@ class AudioPlayer {
         playerJob = scope.launch {
             try {
                 val inputStream = if (path.startsWith("http")) {
-                    java.net.URL(path).openStream()
+                    val conn = java.net.URL(path).openConnection()
+                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+                    if (path.contains("qqmusic") || path.contains("qq.com")) {
+                        conn.setRequestProperty("Referer", "https://y.qq.com/")
+                    } else if (path.contains("migu.cn")) {
+                        conn.setRequestProperty("Referer", "https://m.music.migu.cn/")
+                    }
+                    conn.connect()
+                    conn.getInputStream()
                 } else {
                     java.io.FileInputStream(path)
                 }
@@ -105,7 +113,13 @@ class AudioPlayer {
                 }
 
                 try {
+                    println("AudioPlayer: Starting playback of $path")
                     p.play()
+                    println("AudioPlayer: Playback finished normally")
+                } catch (e: Exception) {
+                    println("AudioPlayer: Error during playback: ${e.message}")
+                    e.printStackTrace()
+                    throw e
                 } finally {
                     progressJob.cancel()
                 }
