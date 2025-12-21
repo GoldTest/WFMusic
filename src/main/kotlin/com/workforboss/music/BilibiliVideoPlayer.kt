@@ -130,6 +130,9 @@ class BilibiliVideoPlayer(
                         factory = {
                             JFXPanel().also { panel ->
                                 jfxPanel = panel
+                                // 设置一个默认的首选大小，防止在某些布局下塌陷为 0
+                                panel.preferredSize = java.awt.Dimension(1280, 720)
+                                
                                 Platform.runLater {
                                         try {
                                             val root = StackPane()
@@ -139,20 +142,15 @@ class BilibiliVideoPlayer(
                                             scene.fill = Color.BLACK
                                             panel.scene = scene
                                             
-                                            println("BilibiliVideoPlayer: JFXPanel scene set successfully")
-                                            
                                             // 开始播放逻辑：优先使用本地缓存，因为 JavaFX 直接播放 B 站在线流速度较慢且不稳定
                                             val videoFile = Storage.getVideoFile(track.source, track.id)
                                             val partFile = File(videoFile.absolutePath + ".part")
                                             
                                             if (videoFile.exists()) {
-                                                println("BilibiliVideoPlayer: Using local video file: ${videoFile.absolutePath}")
                                                 startPlaying(videoFile.toURI().toString(), root)
                                             } else if (partFile.exists() && partFile.length() > 1024 * 1024 * 1) { 
-                                                println("BilibiliVideoPlayer: Using part video file: ${partFile.absolutePath}")
                                                 startPlaying(partFile.toURI().toString(), root)
                                             } else {
-                                                println("BilibiliVideoPlayer: No local file, triggering fallback")
                                                 showStatus("正在请求视频流...", root)
                                                 triggerFallback(root)
                                             }
