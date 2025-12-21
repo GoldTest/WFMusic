@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.workforboss"
-version = "0.2.0"
+version = "0.2.1"
 
 repositories {
     maven("https://maven.aliyun.com/repository/google")
@@ -48,11 +48,14 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Exe, TargetFormat.Msi)
             packageName = "WFMusic"
-            packageVersion = "0.2.0"
+            packageVersion = "0.2.1"
             description = "WFMusic Player"
             copyright = "© 2025 WFMusic. All rights reserved."
             vendor = "WFMusic"
             
+            // 明确指定包含的模块，特别是 JavaFX 模块
+            modules("java.instrument", "java.management", "java.naming", "java.prefs", "java.sql", "java.xml", "jdk.unsupported")
+            modules("javafx.controls", "javafx.graphics", "javafx.media", "javafx.swing", "javafx.base")
             windows {
                 shortcut = true
                 menu = true
