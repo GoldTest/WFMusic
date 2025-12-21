@@ -85,7 +85,7 @@ fun axialRound(q: Double, r: Double): Axial {
     if (xDiff > yDiff && xDiff > zDiff) {
         rx = -ry - rz
     } else if (yDiff > zDiff) {
-        ry = -rx - rz
+        // ry = -rx - rz // ry is not used in Axial(rx, rz)
     } else {
         rz = -rx - ry
     }
