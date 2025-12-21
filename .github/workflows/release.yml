@@ -33,7 +33,7 @@ jobs:
         run: .\gradlew.bat build
 
       - name: Package Windows Artifacts
-        run: .\gradlew.bat packageExe packageMsi
+        run: .\gradlew.bat packageExe packageMsi packagePortable
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
@@ -42,6 +42,7 @@ jobs:
           path: |
             build/compose/binaries/main/exe/*.exe
             build/compose/binaries/main/msi/*.msi
+            build/compose/binaries/main/zip/*.zip
 
       - name: Create Release and Upload Assets
         if: startsWith(github.ref, 'refs/tags/v')
@@ -50,6 +51,7 @@ jobs:
           files: |
             build/compose/binaries/main/exe/*.exe
             build/compose/binaries/main/msi/*.msi
+            build/compose/binaries/main/zip/*.zip
           generate_release_notes: true
           draft: false
           prerelease: false

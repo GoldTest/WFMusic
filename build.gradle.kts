@@ -54,3 +54,12 @@ compose.desktop {
         }
     }
 }
+
+tasks.register<Zip>("packagePortable") {
+    group = "compose desktop"
+    description = "Packages the application as a portable zip file."
+    dependsOn("createDistributable")
+    from("build/compose/binaries/main/app")
+    archiveFileName.set("WFMusic-portable.zip")
+    destinationDirectory.set(layout.buildDirectory.dir("compose/binaries/main/zip"))
+}
