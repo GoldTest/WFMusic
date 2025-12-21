@@ -29,6 +29,7 @@ class AudioPlayer {
     private val _currentOnlineTrack = MutableStateFlow<OnlineTrack?>(null)
     val currentOnlineTrack: StateFlow<OnlineTrack?> = _currentOnlineTrack
 
+    private var loadJob: Job? = null
     var onFinished: (() -> Unit)? = null
     private var currentVolume: Double = 0.8
 
@@ -54,11 +55,20 @@ class AudioPlayer {
 
     fun setVolume(p: Int) {
         currentVolume = (p / 100.0).coerceIn(0.0, 1.0)
-        mediaPlayer?.volume = currentVolume
+        val player = mediaPlayer ?: return
+        Platform.runLater {
+            if (player.status != MediaPlayer.Status.DISPOSED) {
+                player.volume = currentVolume
+            }
+        }
     }
 
     suspend fun loadOnline(track: OnlineTrack) {
-        stop()
+        loadJob?.cancelAndJoin()
+        val job = currentCoroutineContext()[Job]
+        loadJob = job
+        
+        stop(fadeOut = false)
         _currentOnlineTrack.value = track
         _error.value = "正在缓冲..."
         
@@ -108,7 +118,17 @@ class AudioPlayer {
     }
 
     suspend fun loadLocal(track: LocalTrack, onlineInfo: OnlineTrack? = null) {
-        stop()
+        // 如果不是由 loadOnline 调用的（loadJob 不匹配），则处理 Job
+        val currentJob = currentCoroutineContext()[Job]
+        if (loadJob != currentJob) {
+            loadJob?.cancelAndJoin()
+            loadJob = currentJob
+        }
+
+        // 确保旧的播放器完全释放 (不使用淡出效果)
+        stop(fadeOut = false)
+        
+        // 更新状态
         _currentOnlineTrack.value = onlineInfo
         currentPath = track.path
         _durationSec.value = track.durationMillis?.let { it / 1000.0 }
@@ -128,9 +148,9 @@ class AudioPlayer {
                 }
             }
         }
-
+        
         // 增加延迟，确保 native 资源彻底释放
-        delay(200)
+        delay(300)
         
         withContext(Dispatchers.Main) {
             try {
@@ -176,15 +196,28 @@ class AudioPlayer {
         }
     }
 
-    fun play() {
+    fun play(fadeIn: Boolean = false) {
         val player = mediaPlayer ?: return
         if (_isPlaying.value) return
 
         Platform.runLater {
             try {
                 if (mediaPlayer === player && player.status != MediaPlayer.Status.DISPOSED) {
+                    // 如果需要淡入，先将音量设为 0
+                    if (fadeIn) {
+                        player.volume = 0.0
+                    } else {
+                        player.volume = currentVolume
+                    }
+                    
                     player.play()
                     _isPlaying.value = true
+                    
+                    if (fadeIn) {
+                        scope.launch {
+                            smoothFadeVolume(currentVolume)
+                        }
+                    }
                     
                     // 移除旧的监听器
                     progressListener?.let { player.currentTimeProperty().removeListener(it) }
@@ -206,8 +239,10 @@ class AudioPlayer {
     }
 
     fun pause() {
-        _isPlaying.value = false
         val player = mediaPlayer ?: return
+        if (!_isPlaying.value) return
+        
+        _isPlaying.value = false
         Platform.runLater {
             try {
                 if (mediaPlayer === player && player.status == MediaPlayer.Status.PLAYING) {
@@ -219,40 +254,64 @@ class AudioPlayer {
         }
     }
 
-    fun stop() {
-        println("AudioPlayer: stop() called")
+    private suspend fun smoothFadeVolume(target: Double, durationMs: Long = 300) {
+        val player = mediaPlayer ?: return
+        val startVolume = player.volume
+        val steps = 10
+        val stepDelta = (target - startVolume) / steps
+        val stepDelay = durationMs / steps
+
+        for (i in 1..steps) {
+            val nextVol = startVolume + stepDelta * i
+            Platform.runLater {
+                if (player.status != MediaPlayer.Status.DISPOSED) {
+                    player.volume = nextVol.coerceIn(0.0, 1.0)
+                }
+            }
+            delay(stepDelay)
+        }
+    }
+
+    suspend fun stop(fadeOut: Boolean = false) {
+        if (fadeOut && _isPlaying.value) {
+            smoothFadeVolume(0.0)
+        }
+        withContext(Dispatchers.Main) {
+            performStop()
+        }
+    }
+
+    private fun performStop() {
         _isPlaying.value = false
         val player = mediaPlayer
         mediaPlayer = null
         currentMedia = null
         
+        if (player == null) return
+
+        // 移除监听器和回调必须在 JFX 线程
         val action = Runnable {
             try {
-                if (player != null) {
-                    // 先移除监听器
-                    progressListener?.let { 
-                        try {
-                            player.currentTimeProperty().removeListener(it)
-                        } catch (e: Exception) {}
-                    }
-                    progressListener = null
-                    
-                    // 置空回调
-                    player.onReady = null
-                    player.onEndOfMedia = null
-                    player.onError = null
-                    
-                    if (player.status != MediaPlayer.Status.DISPOSED) {
-                        try {
-                            if (player.status == MediaPlayer.Status.PLAYING) {
-                                player.pause()
-                            }
-                            player.stop()
-                        } catch (e: Exception) {}
-                        player.dispose()
-                    }
-                    println("AudioPlayer: MediaPlayer disposed")
+                // 先移除监听器
+                progressListener?.let { 
+                    try {
+                        player.currentTimeProperty().removeListener(it)
+                    } catch (e: Exception) {}
                 }
+                
+                // 置空回调
+                player.onReady = null
+                player.onEndOfMedia = null
+                player.onError = null
+                
+                if (player.status != MediaPlayer.Status.DISPOSED) {
+                    if (player.status == MediaPlayer.Status.PLAYING) {
+                        player.pause()
+                    }
+                    player.stop()
+                    player.dispose()
+                }
+                println("AudioPlayer: MediaPlayer disposed")
             } catch (e: Exception) {
                 println("AudioPlayer: Error during stop/dispose: ${e.message}")
             }
@@ -260,14 +319,16 @@ class AudioPlayer {
 
         if (Platform.isFxApplicationThread()) {
              action.run()
-         } else {
+        } else {
              Platform.runLater(action)
-         }
+        }
     }
 
     fun fullStop() {
-        stop()
-        _positionSec.value = 0.0
+        scope.launch {
+            stop(fadeOut = false)
+            _positionSec.value = 0.0
+        }
     }
 
     fun seekTo(sec: Double) {
@@ -285,7 +346,9 @@ class AudioPlayer {
     }
 
     fun dispose() {
-        fullStop()
-        scope.cancel()
+        scope.launch {
+            stop(fadeOut = false)
+            scope.cancel()
+        }
     }
 }

@@ -109,51 +109,42 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
             val playlist = library.playlists.find { it.id == pid }
             if (playlist != null && playlist.items.isNotEmpty()) {
                 val nextIdx = (idx + 1) % playlist.items.size
+                // 自动播放下一首时，直接调用 loadOnline/loadLocal 逻辑
                 val nextItem = playlist.items[nextIdx]
                 playingIndex = nextIdx
-                
                 scope.launch {
                     msg = "正在自动播放下一首: ${nextItem.title}..."
                     runCatching {
-                        // 策略：如果是播放列表中的音乐，优先检查本地文件
                         val localFile = Storage.getMusicFile(nextItem.source, nextItem.id)
                         if (localFile.exists()) {
-                            msg = "正在播放本地缓存: ${nextItem.title}"
                             player.loadLocal(LocalTrack(
-                                id = nextItem.id,
-                                path = localFile.absolutePath,
-                                title = nextItem.title,
-                                artist = nextItem.artist,
-                                album = nextItem.album,
-                                durationMillis = nextItem.durationMs,
+                                id = nextItem.id, path = localFile.absolutePath,
+                                title = nextItem.title, artist = nextItem.artist,
+                                album = nextItem.album, durationMillis = nextItem.durationMs,
                                 source = nextItem.source
+                            ), onlineInfo = OnlineTrack(
+                                id = nextItem.id, title = nextItem.title, artist = nextItem.artist,
+                                album = nextItem.album, durationMillis = nextItem.durationMs,
+                                previewUrl = "", coverUrl = nextItem.coverUrl,
+                                quality = nextItem.quality, source = nextItem.source,
+                                videoUrl = nextItem.videoUrl, videoWidth = nextItem.videoWidth,
+                                videoHeight = nextItem.videoHeight, videoQuality = nextItem.videoQuality,
+                                headers = nextItem.headers
                             ))
                         } else {
                             val stream = chain.streamUrlFor(nextItem.source, nextItem.id)
-                            if (stream.url.isBlank()) throw Exception("未能获取到有效的播放地址")
-                            
-                            msg = "正在缓冲网络音频 (${stream.quality ?: "标准"})..."
                             player.loadOnline(OnlineTrack(
-                                id = nextItem.id, 
-                                title = nextItem.title, 
-                                artist = nextItem.artist, 
-                                album = nextItem.album,
-                                durationMillis = nextItem.durationMs,
-                                previewUrl = stream.url,
-                                coverUrl = nextItem.coverUrl,
-                                quality = stream.quality ?: nextItem.quality,
-                                source = nextItem.source,
-                                videoUrl = stream.videoUrl,
-                                videoWidth = stream.videoWidth,
-                                videoHeight = stream.videoHeight,
-                                videoQuality = stream.videoQuality,
+                                id = nextItem.id, title = nextItem.title, artist = nextItem.artist,
+                                album = nextItem.album, durationMillis = nextItem.durationMs,
+                                previewUrl = stream.url, coverUrl = nextItem.coverUrl,
+                                quality = stream.quality ?: nextItem.quality, source = nextItem.source,
+                                videoUrl = stream.videoUrl, videoWidth = stream.videoWidth,
+                                videoHeight = stream.videoHeight, videoQuality = stream.videoQuality,
                                 headers = stream.headers
                             ))
                         }
                         player.play()
                         coverUrl = nextItem.coverUrl
-                    }.onFailure {
-                        msg = "自动播放失败: ${it.message}"
                     }
                 }
             }
@@ -532,6 +523,86 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
             
             // 右侧：播放器控制与列表 (垂直堆叠)
             Column(Modifier.weight(1.2f).fillMaxHeight().padding(12.dp)) {
+                val playFromPlaylist = { pid: String, idx: Int ->
+                    val playlist = library.playlists.find { it.id == pid }
+                    val item = playlist?.items?.getOrNull(idx)
+                    if (item != null) {
+                        playingPlaylistId = pid
+                        playingIndex = idx
+                        scope.launch {
+                            msg = "正在获取播放链接: ${item.title}..."
+                            runCatching {
+                                val localFile = Storage.getMusicFile(item.source, item.id)
+                                var currentVideoUrl = item.videoUrl
+                                var currentHeaders = item.headers
+                                var currentWidth = item.videoWidth
+                                var currentHeight = item.videoHeight
+                                var currentVideoQuality = item.videoQuality
+
+                                if (item.source == "bilibili" && currentVideoUrl == null) {
+                                    try {
+                                        val stream = chain.streamUrlFor(item.source, item.id)
+                                        currentVideoUrl = stream.videoUrl
+                                        currentHeaders = stream.headers
+                                        currentWidth = stream.videoWidth
+                                        currentHeight = stream.videoHeight
+                                        currentVideoQuality = stream.videoQuality
+                                        
+                                        val updatedItem = item.copy(
+                                            videoUrl = currentVideoUrl,
+                                            headers = currentHeaders,
+                                            videoWidth = currentWidth,
+                                            videoHeight = currentHeight,
+                                            videoQuality = currentVideoQuality
+                                        )
+                                        library = PlaylistManager.updatePlaylistItem(pid, idx, updatedItem, library)
+                                        Storage.saveLibrary(library)
+                                    } catch (e: Exception) {
+                                        println("Playlist play: Failed to fetch video info: ${e.message}")
+                                    }
+                                }
+
+                                if (localFile.exists()) {
+                                    msg = "正在播放本地缓存: ${item.title}"
+                                    player.loadLocal(LocalTrack(
+                                        id = item.id, path = localFile.absolutePath,
+                                        title = item.title, artist = item.artist,
+                                        album = item.album, durationMillis = item.durationMs,
+                                        source = item.source
+                                    ), onlineInfo = OnlineTrack(
+                                        id = item.id, title = item.title, artist = item.artist,
+                                        album = item.album, durationMillis = item.durationMs,
+                                        previewUrl = "", coverUrl = item.coverUrl,
+                                        quality = item.quality, source = item.source,
+                                        videoUrl = currentVideoUrl, videoWidth = currentWidth,
+                                        videoHeight = currentHeight, videoQuality = currentVideoQuality,
+                                        headers = currentHeaders
+                                    ))
+                                } else {
+                                    val stream = chain.streamUrlFor(item.source, item.id)
+                                    if (stream.url.isBlank()) throw Exception("未能获取到有效的播放地址")
+                                    
+                                    msg = "正在缓冲网络音频 (${stream.quality ?: "标准"})..."
+                                    player.loadOnline(OnlineTrack(
+                                        id = item.id, title = item.title, artist = item.artist,
+                                        album = item.album, durationMillis = item.durationMs,
+                                        previewUrl = stream.url, coverUrl = item.coverUrl,
+                                        quality = stream.quality ?: item.quality, source = item.source,
+                                        videoUrl = stream.videoUrl, videoWidth = stream.videoWidth,
+                                        videoHeight = stream.videoHeight, videoQuality = stream.videoQuality,
+                                        headers = stream.headers
+                                    ))
+                                }
+                                player.play()
+                                coverUrl = item.coverUrl
+                                msg = null
+                            }.onFailure {
+                                msg = "播放失败: ${it.message}"
+                            }
+                        }
+                    }
+                }
+
                 // 当前播放卡片 (减小高度，只保留封面和控制)
                 Card(
                     modifier = Modifier.fillMaxWidth().wrapContentHeight(),
@@ -595,12 +666,25 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                         }
                         
                         Spacer(Modifier.height(12.dp))
+                        
                         PlayerControls(
                             isPlaying = isPlaying,
                             posSec = posSec,
                             durSec = durSec,
                             onPlayPause = { if (isPlaying) player.pause() else player.play() },
-                            onStop = { player.fullStop() },
+                            onPrevious = {
+                                if (playingPlaylistId != null && playingIndex > 0) {
+                                    playFromPlaylist(playingPlaylistId!!, playingIndex - 1)
+                                }
+                            },
+                            onNext = {
+                                if (playingPlaylistId != null) {
+                                    val size = library.playlists.find { it.id == playingPlaylistId }?.items?.size ?: 0
+                                    if (playingIndex < size - 1) {
+                                        playFromPlaylist(playingPlaylistId!!, playingIndex + 1)
+                                    }
+                                }
+                            },
                             onVolumePercent = { player.setVolume(it) },
                             onSeek = { player.seekTo(it) }
                         )
@@ -662,98 +746,8 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                 Storage.saveLibrary(library)
                             },
                             onPlayItem = { item, idx ->
-                                playingPlaylistId = selectedPlaylistId
-                                playingIndex = idx
-                                scope.launch {
-                                    msg = "正在获取播放链接: ${item.title}..."
-                                    runCatching {
-                                        // 策略：如果是播放列表中的音乐，优先检查本地文件
-                                        val localFile = Storage.getMusicFile(item.source, item.id)
-                                        
-                                        // 对于 B 站，即使音频有本地缓存，我们也可能需要解析出 videoUrl 以便播放视频
-                                        var currentVideoUrl = item.videoUrl
-                                        var currentHeaders = item.headers
-                                        var currentWidth = item.videoWidth
-                                        var currentHeight = item.videoHeight
-                                        var currentVideoQuality = item.videoQuality
-
-                                        if (item.source == "bilibili" && currentVideoUrl == null) {
-                                            try {
-                                                val stream = chain.streamUrlFor(item.source, item.id)
-                                                currentVideoUrl = stream.videoUrl
-                                                currentHeaders = stream.headers
-                                                currentWidth = stream.videoWidth
-                                                currentHeight = stream.videoHeight
-                                                currentVideoQuality = stream.videoQuality
-                                                
-                                                // 保存回播放列表，避免下次再解析
-                                                val updatedItem = item.copy(
-                                                    videoUrl = currentVideoUrl,
-                                                    headers = currentHeaders,
-                                                    videoWidth = currentWidth,
-                                                    videoHeight = currentHeight,
-                                                    videoQuality = currentVideoQuality
-                                                )
-                                                library = PlaylistManager.updatePlaylistItem(selectedPlaylistId!!, idx, updatedItem, library)
-                                                Storage.saveLibrary(library)
-                                            } catch (e: Exception) {
-                                                println("Playlist play: Failed to fetch video info: ${e.message}")
-                                            }
-                                        }
-
-                                        if (localFile.exists()) {
-                                            msg = "正在播放本地缓存: ${item.title}"
-                                            player.loadLocal(LocalTrack(
-                                                id = item.id,
-                                                path = localFile.absolutePath,
-                                                title = item.title,
-                                                artist = item.artist,
-                                                album = item.album,
-                                                durationMillis = item.durationMs,
-                                                source = item.source
-                                            ), onlineInfo = OnlineTrack(
-                                                id = item.id,
-                                                title = item.title,
-                                                artist = item.artist,
-                                                album = item.album,
-                                                durationMillis = item.durationMs,
-                                                previewUrl = "", 
-                                                coverUrl = item.coverUrl,
-                                                quality = item.quality,
-                                                source = item.source,
-                                                videoUrl = currentVideoUrl,
-                                                videoWidth = currentWidth,
-                                                videoHeight = currentHeight,
-                                                videoQuality = currentVideoQuality,
-                                                headers = currentHeaders
-                                            ))
-                                        } else {
-                                            val stream = chain.streamUrlFor(item.source, item.id)
-                                            if (stream.url.isBlank()) throw Exception("未能获取到有效的播放地址")
-                                            
-                                            msg = "正在缓冲网络音频 (${stream.quality ?: "标准"})..."
-                                            player.loadOnline(OnlineTrack(
-                                                id = item.id,
-                                                title = item.title,
-                                                artist = item.artist,
-                                                album = item.album,
-                                                durationMillis = item.durationMs,
-                                                previewUrl = stream.url,
-                                                coverUrl = item.coverUrl,
-                                                quality = stream.quality ?: item.quality,
-                                                source = item.source,
-                                                videoUrl = stream.videoUrl,
-                                                videoWidth = stream.videoWidth,
-                                                videoHeight = stream.videoHeight,
-                                                videoQuality = stream.videoQuality,
-                                                headers = stream.headers
-                                            ))
-                                        }
-                                        player.play()
-                                        coverUrl = item.coverUrl
-                                    }.onFailure {
-                                        msg = "播放失败: ${it.message}"
-                                    }
+                                selectedPlaylistId?.let { pid ->
+                                    playFromPlaylist(pid, idx)
                                 }
                             }
                         )
@@ -1008,6 +1002,7 @@ private fun SearchResultItem(
                             videoUrl = stream.videoUrl,
                             videoWidth = stream.videoWidth,
                             videoHeight = stream.videoHeight,
+                            videoQuality = stream.videoQuality,
                             headers = stream.headers
                         )
                         onTrackSelect(actualCover)
@@ -1139,7 +1134,8 @@ private fun PlayerControls(
     posSec: Double,
     durSec: Double?,
     onPlayPause: () -> Unit,
-    onStop: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
     onVolumePercent: (Int) -> Unit,
     onSeek: (Double) -> Unit
 ) {
@@ -1197,33 +1193,40 @@ private fun PlayerControls(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onStop) {
-                Icon(Icons.Default.Delete, "Stop", tint = MaterialTheme.colors.onSurface.copy(alpha = 0.6f))
+            // 上一曲
+            IconButton(onClick = onPrevious) {
+                Icon(Icons.Default.SkipPrevious, "Previous", tint = MaterialTheme.colors.onSurface.copy(alpha = 0.8f))
             }
             
             FloatingActionButton(
                 onClick = onPlayPause,
                 backgroundColor = MaterialTheme.colors.primary,
                 contentColor = Color.Black,
-                modifier = Modifier.size(48.dp)
+                modifier = Modifier.size(40.dp) // 调回默认尺寸
             ) {
                 Icon(
-                    if (isPlaying) Icons.Default.Close else Icons.Default.PlayArrow, // 使用 Close 暂时替代 Pause
-                    contentDescription = "Play/Pause"
+                    if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = "Play/Pause",
+                    modifier = Modifier.size(24.dp)
                 )
+            }
+
+            // 下一曲
+            IconButton(onClick = onNext) {
+                Icon(Icons.Default.SkipNext, "Next", tint = MaterialTheme.colors.onSurface.copy(alpha = 0.8f))
             }
             
             // 音量控制
             var vol by remember { mutableStateOf(0.8f) }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Notifications, null, modifier = Modifier.size(16.dp), tint = Color.Gray) // 使用 Notifications 替代 Volume
+                Icon(Icons.Default.VolumeUp, null, modifier = Modifier.size(20.dp), tint = Color.Gray)
                 Slider(
                     value = vol,
                     onValueChange = {
                         vol = it
                         onVolumePercent((it * 100).toInt())
                     },
-                    modifier = Modifier.width(80.dp)
+                    modifier = Modifier.width(100.dp) // 恢复默认宽度
                 )
             }
         }

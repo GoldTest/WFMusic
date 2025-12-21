@@ -1,12 +1,10 @@
 package com.workforboss.music
 
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.Surface
-import androidx.compose.material.Text
-import androidx.compose.material.MaterialTheme
+import androidx.compose.material.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.ui.Alignment
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -29,6 +27,12 @@ import javafx.scene.control.Label
 import javax.swing.SwingUtilities
 import java.awt.Toolkit
 
+import androidx.compose.ui.window.WindowPlacement
+import androidx.compose.ui.input.key.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+
 class BilibiliVideoPlayer(
     private val audioPlayer: AudioPlayer
 ) {
@@ -36,6 +40,9 @@ class BilibiliVideoPlayer(
         private set
     
     var currentTrack by mutableStateOf<OnlineTrack?>(null)
+        private set
+
+    var isFullscreen by mutableStateOf(false)
         private set
 
     private var videoPlayer: MediaPlayer? = null
@@ -97,21 +104,27 @@ class BilibiliVideoPlayer(
 
         val windowState = rememberWindowState(
             size = DpSize(widthDp, heightDp),
-            position = androidx.compose.ui.window.WindowPosition(androidx.compose.ui.Alignment.Center)
+            position = androidx.compose.ui.window.WindowPosition(androidx.compose.ui.Alignment.Center),
+            placement = if (isFullscreen) WindowPlacement.Fullscreen else WindowPlacement.Floating
         )
         
         // 当视频切换时，自动调整窗口大小适配新视频比例
         LaunchedEffect(track.id) {
-            windowState.size = DpSize(widthDp, heightDp)
+            if (!isFullscreen) {
+                windowState.size = DpSize(widthDp, heightDp)
+            }
         }
 
         Window(
             onCloseRequest = { closeVideo() },
             state = windowState,
-            title = "Bilibili Video - ${track.title}",
-            alwaysOnTop = false
+            title = "Bilibili Video - ${track.title} [${track.videoQuality ?: if (track.videoHeight != null) "${track.videoHeight}P" else "未知"}]",
+            alwaysOnTop = isFullscreen,
+            undecorated = isFullscreen
         ) {
-            Box(Modifier.fillMaxSize()) {
+            Box(
+                Modifier.fillMaxSize()
+            ) {
                 key(track.id) {
                     SwingPanel(
                         factory = {
@@ -148,19 +161,44 @@ class BilibiliVideoPlayer(
                     )
                 }
 
-                // 右下角分辨率角标
-                val quality = track.videoQuality ?: if (track.videoHeight != null) "${track.videoHeight}P" else "未知"
-                Surface(
+                // 右下角控制区
+                Row(
                     modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-                    color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f),
-                    shape = RoundedCornerShape(4.dp)
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = quality,
-                        color = androidx.compose.ui.graphics.Color.White,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        style = MaterialTheme.typography.caption
-                    )
+                    // 分辨率角标
+                    val quality = track.videoQuality ?: if (track.videoHeight != null) "${track.videoHeight}P" else "未知"
+                    Surface(
+                        color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = quality,
+                            color = androidx.compose.ui.graphics.Color.White,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.caption
+                        )
+                    }
+                    
+                    Spacer(Modifier.width(8.dp))
+                    
+                    // 全屏按钮
+                    Surface(
+                        color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        IconButton(
+                            onClick = { isFullscreen = !isFullscreen },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                contentDescription = "Toggle Fullscreen",
+                                tint = androidx.compose.ui.graphics.Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
