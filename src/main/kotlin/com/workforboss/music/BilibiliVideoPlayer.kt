@@ -131,30 +131,36 @@ class BilibiliVideoPlayer(
                             JFXPanel().also { panel ->
                                 jfxPanel = panel
                                 Platform.runLater {
-                                    val root = StackPane()
-                                    root.style = "-fx-background-color: black;"
-                                    rootPane = root
-                                    val scene = Scene(root)
-                                    scene.fill = Color.BLACK
-                                    panel.scene = scene
-                                    
-                                    // 开始播放逻辑：优先使用本地缓存，因为 JavaFX 直接播放 B 站在线流速度较慢且不稳定
-                                    val videoFile = Storage.getVideoFile(track.source, track.id)
-                                    val partFile = File(videoFile.absolutePath + ".part")
-                                    
-                                    if (videoFile.exists()) {
-                                        println("BilibiliVideoPlayer: Using local video file")
-                                        startPlaying(videoFile.toURI().toString(), root)
-                                    } else if (partFile.exists() && partFile.length() > 1024 * 1024 * 1) { // 降低门槛：1MB 即可开始播放
-                                        println("BilibiliVideoPlayer: Using part video file")
-                                        startPlaying(partFile.toURI().toString(), root)
-                                    } else {
-                                        // B 站流需要 Referer 才能播放，JavaFX Media 不支持 header。
-                                        // 所以我们直接进入 fallback 模式，让 Storage 下载并播放文件。
-                                        showStatus("正在请求视频流...", root)
-                                        triggerFallback(root)
+                                        try {
+                                            val root = StackPane()
+                                            root.style = "-fx-background-color: black;"
+                                            rootPane = root
+                                            val scene = Scene(root)
+                                            scene.fill = Color.BLACK
+                                            panel.scene = scene
+                                            
+                                            println("BilibiliVideoPlayer: JFXPanel scene set successfully")
+                                            
+                                            // 开始播放逻辑：优先使用本地缓存，因为 JavaFX 直接播放 B 站在线流速度较慢且不稳定
+                                            val videoFile = Storage.getVideoFile(track.source, track.id)
+                                            val partFile = File(videoFile.absolutePath + ".part")
+                                            
+                                            if (videoFile.exists()) {
+                                                println("BilibiliVideoPlayer: Using local video file: ${videoFile.absolutePath}")
+                                                startPlaying(videoFile.toURI().toString(), root)
+                                            } else if (partFile.exists() && partFile.length() > 1024 * 1024 * 1) { 
+                                                println("BilibiliVideoPlayer: Using part video file: ${partFile.absolutePath}")
+                                                startPlaying(partFile.toURI().toString(), root)
+                                            } else {
+                                                println("BilibiliVideoPlayer: No local file, triggering fallback")
+                                                showStatus("正在请求视频流...", root)
+                                                triggerFallback(root)
+                                            }
+                                        } catch (e: Exception) {
+                                            println("BilibiliVideoPlayer: Error initializing JavaFX Scene: ${e.message}")
+                                            e.printStackTrace()
+                                        }
                                     }
-                                }
                             }
                         },
                         modifier = Modifier.fillMaxSize()
