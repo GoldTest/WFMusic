@@ -32,6 +32,11 @@ object Storage {
         }
     }
 
+    fun getVideoFile(source: String, id: String): File {
+        val sourceDir = File(musicDir, source).apply { if (!exists()) mkdirs() }
+        return File(sourceDir, "$id.mp4")
+    }
+
     fun loadLibrary(): LibraryState {
         if (!libraryFile.exists()) return LibraryState()
         return json.decodeFromString(LibraryState.serializer(), libraryFile.readText())
@@ -44,7 +49,11 @@ object Storage {
 
     fun downloadMusic(url: String, target: File, onProgress: ((Float) -> Unit)? = null) {
         if (target.exists()) return
-        val tmp = File.createTempFile("download", ".tmp", cacheDir)
+        val parent = target.parentFile
+        if (parent != null && !parent.exists()) parent.mkdirs()
+        
+        // 直接下载到目标文件，这样部分下载的内容也可以尝试播放
+        val tmp = File(target.absolutePath + ".part")
         try {
             val conn = URI(url).toURL().openConnection()
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
@@ -73,7 +82,7 @@ object Storage {
             }
             Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
         } catch (e: Exception) {
-            tmp.delete()
+            if (tmp.exists()) tmp.delete()
             throw e
         }
     }

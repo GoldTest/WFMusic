@@ -11,7 +11,11 @@ data class MusicItemId(
     val album: String? = null,
     val durationMs: Long? = null,
     val coverUrl: String? = null,
-    val quality: String? = null
+    val quality: String? = null,
+    val videoUrl: String? = null,
+    val videoWidth: Int? = null,
+    val videoHeight: Int? = null,
+    val headers: Map<String, String>? = null
 )
 
 @Serializable
@@ -24,7 +28,11 @@ data class OnlineTrack(
     val previewUrl: String,
     val coverUrl: String? = null,
     val quality: String? = null,
-    val source: String
+    val source: String,
+    val videoUrl: String? = null,
+    val videoWidth: Int? = null,
+    val videoHeight: Int? = null,
+    val headers: Map<String, String>? = null
 )
 
 @Serializable

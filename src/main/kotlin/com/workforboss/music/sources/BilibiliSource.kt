@@ -177,7 +177,7 @@ class BilibiliSource : SourceAdapter {
                     album = "Bilibili",
                     durationMs = parseDuration(item.duration),
                     coverUrl = if (item.pic.startsWith("//")) "https:${item.pic}" else item.pic,
-                    quality = "待解析",
+                    quality = "点击解析",
                     source = "bilibili"
                 )
             }
@@ -234,6 +234,10 @@ class BilibiliSource : SourceAdapter {
             throw IllegalStateException("Audio URL not found")
         }
 
+        // 获取视频流，同样选择最高清晰度的
+        val bestVideo = playResp.data?.dash?.video?.maxByOrNull { it.id }
+        val videoUrl = bestVideo?.baseUrl
+
         val qualityLabel = when (bestAudio?.id) {
             30216 -> "64k"
             30232 -> "128k"
@@ -244,7 +248,18 @@ class BilibiliSource : SourceAdapter {
         }
         
         println("Bilibili: Found stream URL ($qualityLabel): ${audioUrl.take(100)}...")
-        return StreamResult(audioUrl, qualityLabel)
+        return StreamResult(
+            url = audioUrl,
+            quality = qualityLabel,
+            videoUrl = videoUrl,
+            videoWidth = bestVideo?.width,
+            videoHeight = bestVideo?.height,
+            headers = mapOf(
+                "User-Agent" to commonHeaders["User-Agent"]!!,
+                "Referer" to "https://www.bilibili.com/video/$id",
+                "Cookie" to "buvid3=$buvid3; buvid4=$buvid4"
+            )
+        )
     }
 
     override suspend fun lyrics(id: String): String? = null
@@ -301,8 +316,19 @@ data class BilibiliPlayResp(val code: Int = 0, val data: BilibiliPlayData? = nul
 @Serializable
 data class BilibiliPlayData(val dash: BilibiliDash? = null, val durl: List<BilibiliDurl>? = null)
 @Serializable
-data class BilibiliDash(val audio: List<BilibiliAudioItem>? = null)
+data class BilibiliDash(
+    val audio: List<BilibiliAudioItem>? = null,
+    val video: List<BilibiliVideoItem>? = null
+)
 @Serializable
 data class BilibiliAudioItem(val baseUrl: String = "", val id: Int = 0)
+@Serializable
+data class BilibiliVideoItem(
+    val baseUrl: String = "",
+    val id: Int = 0,
+    val width: Int = 0,
+    val height: Int = 0,
+    val frameRate: String = ""
+)
 @Serializable
 data class BilibiliDurl(val url: String = "")

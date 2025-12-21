@@ -36,6 +36,8 @@ dependencies {
     implementation("org.openjfx:javafx-media:$jfxVersion:win")
     implementation("org.openjfx:javafx-graphics:$jfxVersion:win")
     implementation("org.openjfx:javafx-base:$jfxVersion:win")
+    implementation("org.openjfx:javafx-controls:$jfxVersion:win")
+    implementation("org.openjfx:javafx-swing:$jfxVersion:win")
 }
 
 compose.desktop {

@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.Canvas
@@ -83,6 +84,7 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
         } else loaded)
     }
     val player = remember { AudioPlayer() }
+    val videoPlayer = remember { BilibiliVideoPlayer(player) }
     val isPlaying by player.isPlaying.collectAsState()
     val posSec by player.positionSec.collectAsState()
     val durSec by player.durationSec.collectAsState()
@@ -140,7 +142,11 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                 previewUrl = stream.url,
                                 coverUrl = nextItem.coverUrl,
                                 quality = stream.quality ?: nextItem.quality,
-                                source = nextItem.source
+                                source = nextItem.source,
+                                videoUrl = stream.videoUrl,
+                                videoWidth = stream.videoWidth,
+                                videoHeight = stream.videoHeight,
+                                headers = stream.headers
                             ))
                         }
                         player.play()
@@ -553,7 +559,16 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                         Spacer(Modifier.height(12.dp))
                         
                         // 封面区域
-                        Box(Modifier.fillMaxWidth().height(160.dp).background(Color.Black.copy(alpha = 0.05f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                        val currentOnline = player.currentOnlineTrack.collectAsState().value
+                        Box(
+                            Modifier.fillMaxWidth().height(160.dp)
+                                .background(Color.Black.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+                                .clickable(
+                                    enabled = currentOnline?.source == "bilibili" && currentOnline.videoUrl != null,
+                                    onClick = { currentOnline?.let { videoPlayer.toggleVideo(it) } }
+                                ), 
+                            contentAlignment = Alignment.Center
+                        ) {
                             SpectrumVisualization(isPlaying = isPlaying)
                             val currentCover = coverUrl
                             if (currentCover != null) {
@@ -564,6 +579,17 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                     contentScale = ContentScale.Crop,
                                     onLoading = { CircularProgressIndicator(modifier = Modifier.size(24.dp)) }
                                 )
+                                
+                                // 如果是 B 站视频，显示一个小的播放图标提示可以点击
+                                if (currentOnline?.source == "bilibili" && currentOnline.videoUrl != null) {
+                                    Box(
+                                        Modifier.align(Alignment.BottomEnd).padding(12.dp)
+                                            .size(24.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                    }
+                                }
                             }
                         }
                         
@@ -648,6 +674,20 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                                 album = item.album,
                                                 durationMillis = item.durationMs,
                                                 source = item.source
+                                            ), onlineInfo = OnlineTrack(
+                                                id = item.id,
+                                                title = item.title,
+                                                artist = item.artist,
+                                                album = item.album,
+                                                durationMillis = item.durationMs,
+                                                previewUrl = "", // 本地播放不需要 previewUrl
+                                                coverUrl = item.coverUrl,
+                                                quality = item.quality,
+                                                source = item.source,
+                                                videoUrl = item.videoUrl,
+                                                videoWidth = item.videoWidth,
+                                                videoHeight = item.videoHeight,
+                                                headers = item.headers
                                             ))
                                         } else {
                                             val stream = chain.streamUrlFor(item.source, item.id)
@@ -663,7 +703,11 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                                 previewUrl = stream.url,
                                                 coverUrl = item.coverUrl,
                                                 quality = stream.quality ?: item.quality,
-                                                source = item.source
+                                                source = item.source,
+                                                videoUrl = stream.videoUrl,
+                                                videoWidth = stream.videoWidth,
+                                                videoHeight = stream.videoHeight,
+                                                headers = stream.headers
                                             ))
                                         }
                                         player.play()
@@ -679,6 +723,9 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
             }
         }
     }
+
+    // 视频窗口渲染
+    videoPlayer.VideoWindow()
 
     // 重命名对话框
     val renamingId = showRenameDialog
@@ -918,7 +965,11 @@ private fun SearchResultItem(
                             previewUrl = stream.url,
                             coverUrl = actualCover,
                             quality = stream.quality ?: t.quality,
-                            source = t.source
+                            source = t.source,
+                            videoUrl = stream.videoUrl,
+                            videoWidth = stream.videoWidth,
+                            videoHeight = stream.videoHeight,
+                            headers = stream.headers
                         )
                         onTrackSelect(actualCover)
                         onClearPlayingContext()
@@ -955,7 +1006,11 @@ private fun SearchResultItem(
                                 album = t.album,
                                 durationMs = t.durationMs,
                                 coverUrl = t.coverUrl,
-                                quality = t.quality
+                                quality = t.quality,
+                                videoUrl = null,
+                                videoWidth = null,
+                                videoHeight = null,
+                                headers = null
                             )
                             val newState = PlaylistManager.addToPlaylist(pl.id, item, library)
                             onLibraryUpdate(newState)
@@ -976,7 +1031,11 @@ private fun SearchResultItem(
                             album = t.album,
                             durationMs = t.durationMs,
                             coverUrl = t.coverUrl,
-                            quality = t.quality
+                            quality = t.quality,
+                            videoUrl = null,
+                            videoWidth = null,
+                            videoHeight = null,
+                            headers = null
                         )
                         newState = PlaylistManager.addToPlaylist(newPlId, item, newState)
                         onLibraryUpdate(newState)

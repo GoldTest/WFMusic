@@ -11,13 +11,21 @@ data class Track(
     val durationMs: Long? = null,
     val coverUrl: String? = null,
     val quality: String? = null,
-    val source: String
+    val source: String,
+    val videoUrl: String? = null,
+    val videoWidth: Int? = null,
+    val videoHeight: Int? = null,
+    val headers: Map<String, String>? = null
 )
 
 @Serializable
 data class StreamResult(
     val url: String,
-    val quality: String? = null
+    val quality: String? = null,
+    val videoUrl: String? = null,
+    val videoWidth: Int? = null,
+    val videoHeight: Int? = null,
+    val headers: Map<String, String>? = null
 )
 
 interface SourceAdapter {

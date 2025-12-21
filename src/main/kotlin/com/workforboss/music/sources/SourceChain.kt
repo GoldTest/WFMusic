@@ -14,7 +14,7 @@ class SourceChain {
         "bilibili" to BilibiliSource(),
         "itunes" to ItunesSource()
     )
-    private val order = listOf("netease", "qq", "kugou", "kuwo", "migu", "bilibili", "itunes")
+    private val order = listOf("bilibili", "netease", "qq", "kugou", "kuwo", "migu", "itunes")
 
     suspend fun search(q: String, page: Int = 1): List<Track> = coroutineScope {
         val jobs = order.map { name ->
