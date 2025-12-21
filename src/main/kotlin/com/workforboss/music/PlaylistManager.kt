@@ -70,5 +70,26 @@ object PlaylistManager {
             } else pl
         })
     }
+
+    fun moveItemBetweenPlaylists(fromPlaylistId: String, index: Int, toPlaylistId: String, state: LibraryState): LibraryState {
+        var itemToMove: MusicItemId? = null
+        val intermediateState = state.copy(playlists = state.playlists.map { pl ->
+            if (pl.id == fromPlaylistId) {
+                val list = pl.items.toMutableList()
+                if (index in list.indices) {
+                    itemToMove = list.removeAt(index)
+                }
+                pl.copy(items = list)
+            } else pl
+        })
+        
+        val item = itemToMove ?: return state
+        
+        return intermediateState.copy(playlists = intermediateState.playlists.map { pl ->
+            if (pl.id == toPlaylistId) {
+                pl.copy(items = pl.items + item)
+            } else pl
+        })
+    }
 }
 

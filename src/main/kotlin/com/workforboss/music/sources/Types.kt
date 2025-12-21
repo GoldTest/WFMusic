@@ -15,6 +15,7 @@ data class Track(
     val videoUrl: String? = null,
     val videoWidth: Int? = null,
     val videoHeight: Int? = null,
+    val videoQuality: String? = null,
     val headers: Map<String, String>? = null
 )
 
@@ -25,6 +26,7 @@ data class StreamResult(
     val videoUrl: String? = null,
     val videoWidth: Int? = null,
     val videoHeight: Int? = null,
+    val videoQuality: String? = null,
     val headers: Map<String, String>? = null
 )
 

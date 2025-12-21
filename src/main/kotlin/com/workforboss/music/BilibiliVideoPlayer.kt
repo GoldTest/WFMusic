@@ -1,6 +1,13 @@
 package com.workforboss.music
 
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.Surface
+import androidx.compose.material.Text
+import androidx.compose.material.MaterialTheme
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.window.Window
@@ -20,6 +27,7 @@ import java.io.File
 import javafx.scene.paint.Color
 import javafx.scene.control.Label
 import javax.swing.SwingUtilities
+import java.awt.Toolkit
 
 class BilibiliVideoPlayer(
     private val audioPlayer: AudioPlayer
@@ -71,12 +79,31 @@ class BilibiliVideoPlayer(
         if (!isVisible || currentTrack == null) return
         
         val track = currentTrack!!
+        
+        // 获取屏幕尺寸，计算 80% 屏幕高度
+        val screenSize = Toolkit.getDefaultToolkit().screenSize
+        val screenHeight = screenSize.height
+        val targetHeightPx = (screenHeight * 0.8).toInt()
+        
+        // 根据视频比例计算宽度，默认 16:9
+        val videoWidth = track.videoWidth ?: 1920
+        val videoHeight = track.videoHeight ?: 1080
+        val ratio = videoWidth.toFloat() / videoHeight.toFloat()
+        val targetWidthPx = (targetHeightPx * ratio).toInt()
+
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val widthDp = with(density) { targetWidthPx.toDp() }
+        val heightDp = with(density) { targetHeightPx.toDp() }
+
         val windowState = rememberWindowState(
-            size = DpSize(
-                (track.videoWidth?.dp ?: 800.dp).coerceAtMost(1200.dp),
-                (track.videoHeight?.dp ?: 450.dp).coerceAtMost(800.dp)
-            )
+            size = DpSize(widthDp, heightDp),
+            position = androidx.compose.ui.window.WindowPosition(androidx.compose.ui.Alignment.Center)
         )
+        
+        // 当视频切换时，自动调整窗口大小适配新视频比例
+        LaunchedEffect(track.id) {
+            windowState.size = DpSize(widthDp, heightDp)
+        }
 
         Window(
             onCloseRequest = { closeVideo() },
@@ -84,40 +111,57 @@ class BilibiliVideoPlayer(
             title = "Bilibili Video - ${track.title}",
             alwaysOnTop = true
         ) {
-            key(track.id) {
-                SwingPanel(
-                    factory = {
-                        JFXPanel().also { panel ->
-                            jfxPanel = panel
-                            Platform.runLater {
-                                val root = StackPane()
-                                root.style = "-fx-background-color: black;"
-                                rootPane = root
-                                val scene = Scene(root)
-                                scene.fill = Color.BLACK
-                                panel.scene = scene
-                                
-                                // 开始播放逻辑：优先使用本地缓存，因为 JavaFX 直接播放 B 站在线流速度较慢且不稳定
-                                val videoFile = Storage.getVideoFile(track.source, track.id)
-                                val partFile = File(videoFile.absolutePath + ".part")
-                                
-                                if (videoFile.exists()) {
-                                    println("BilibiliVideoPlayer: Using local video file")
-                                    startPlaying(videoFile.toURI().toString(), root)
-                                } else if (partFile.exists() && partFile.length() > 1024 * 1024 * 1) { // 降低门槛：1MB 即可开始播放
-                                    println("BilibiliVideoPlayer: Using part video file")
-                                    startPlaying(partFile.toURI().toString(), root)
-                                } else {
-                                    // B 站流需要 Referer 才能播放，JavaFX Media 不支持 header。
-                                    // 所以我们直接进入 fallback 模式，让 Storage 下载并播放文件。
-                                    showStatus("正在请求视频流...", root)
-                                    triggerFallback(root)
+            Box(Modifier.fillMaxSize()) {
+                key(track.id) {
+                    SwingPanel(
+                        factory = {
+                            JFXPanel().also { panel ->
+                                jfxPanel = panel
+                                Platform.runLater {
+                                    val root = StackPane()
+                                    root.style = "-fx-background-color: black;"
+                                    rootPane = root
+                                    val scene = Scene(root)
+                                    scene.fill = Color.BLACK
+                                    panel.scene = scene
+                                    
+                                    // 开始播放逻辑：优先使用本地缓存，因为 JavaFX 直接播放 B 站在线流速度较慢且不稳定
+                                    val videoFile = Storage.getVideoFile(track.source, track.id)
+                                    val partFile = File(videoFile.absolutePath + ".part")
+                                    
+                                    if (videoFile.exists()) {
+                                        println("BilibiliVideoPlayer: Using local video file")
+                                        startPlaying(videoFile.toURI().toString(), root)
+                                    } else if (partFile.exists() && partFile.length() > 1024 * 1024 * 1) { // 降低门槛：1MB 即可开始播放
+                                        println("BilibiliVideoPlayer: Using part video file")
+                                        startPlaying(partFile.toURI().toString(), root)
+                                    } else {
+                                        // B 站流需要 Referer 才能播放，JavaFX Media 不支持 header。
+                                        // 所以我们直接进入 fallback 模式，让 Storage 下载并播放文件。
+                                        showStatus("正在请求视频流...", root)
+                                        triggerFallback(root)
+                                    }
                                 }
                             }
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                // 右下角分辨率角标
+                val quality = track.videoQuality ?: if (track.videoHeight != null) "${track.videoHeight}P" else "未知"
+                Surface(
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                    color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text(
+                        text = quality,
+                        color = androidx.compose.ui.graphics.Color.White,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.caption
+                    )
+                }
             }
         }
     }

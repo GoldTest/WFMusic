@@ -146,6 +146,7 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                 videoUrl = stream.videoUrl,
                                 videoWidth = stream.videoWidth,
                                 videoHeight = stream.videoHeight,
+                                videoQuality = stream.videoQuality,
                                 headers = stream.headers
                             ))
                         }
@@ -656,6 +657,10 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                 library = PlaylistManager.removeFromPlaylist(pid, idx, library)
                                 Storage.saveLibrary(library)
                             },
+                            onMoveToPlaylist = { fromPid, idx, toPid ->
+                                library = PlaylistManager.moveItemBetweenPlaylists(fromPid, idx, toPid, library)
+                                Storage.saveLibrary(library)
+                            },
                             onPlayItem = { item, idx ->
                                 playingPlaylistId = selectedPlaylistId
                                 playingIndex = idx
@@ -670,6 +675,7 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                         var currentHeaders = item.headers
                                         var currentWidth = item.videoWidth
                                         var currentHeight = item.videoHeight
+                                        var currentVideoQuality = item.videoQuality
 
                                         if (item.source == "bilibili" && currentVideoUrl == null) {
                                             try {
@@ -678,13 +684,15 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                                 currentHeaders = stream.headers
                                                 currentWidth = stream.videoWidth
                                                 currentHeight = stream.videoHeight
+                                                currentVideoQuality = stream.videoQuality
                                                 
                                                 // 保存回播放列表，避免下次再解析
                                                 val updatedItem = item.copy(
                                                     videoUrl = currentVideoUrl,
                                                     headers = currentHeaders,
                                                     videoWidth = currentWidth,
-                                                    videoHeight = currentHeight
+                                                    videoHeight = currentHeight,
+                                                    videoQuality = currentVideoQuality
                                                 )
                                                 library = PlaylistManager.updatePlaylistItem(selectedPlaylistId!!, idx, updatedItem, library)
                                                 Storage.saveLibrary(library)
@@ -716,6 +724,7 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                                 videoUrl = currentVideoUrl,
                                                 videoWidth = currentWidth,
                                                 videoHeight = currentHeight,
+                                                videoQuality = currentVideoQuality,
                                                 headers = currentHeaders
                                             ))
                                         } else {
@@ -736,6 +745,7 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                                 videoUrl = stream.videoUrl,
                                                 videoWidth = stream.videoWidth,
                                                 videoHeight = stream.videoHeight,
+                                                videoQuality = stream.videoQuality,
                                                 headers = stream.headers
                                             ))
                                         }
@@ -1035,7 +1045,12 @@ private fun SearchResultItem(
                                 album = t.album,
                                 durationMs = t.durationMs,
                                 coverUrl = t.coverUrl,
-                                quality = t.quality
+                                quality = t.quality,
+                                videoUrl = t.videoUrl,
+                                videoWidth = t.videoWidth,
+                                videoHeight = t.videoHeight,
+                                videoQuality = t.videoQuality,
+                                headers = t.headers
                             )
                             val newState = PlaylistManager.addToPlaylist(pl.id, item, library)
                             onLibraryUpdate(newState)
@@ -1075,7 +1090,12 @@ private fun SearchResultItem(
                             album = t.album,
                             durationMs = t.durationMs,
                             coverUrl = t.coverUrl,
-                            quality = t.quality
+                            quality = t.quality,
+                            videoUrl = t.videoUrl,
+                            videoWidth = t.videoWidth,
+                            videoHeight = t.videoHeight,
+                            videoQuality = t.videoQuality,
+                            headers = t.headers
                         )
                         newState = PlaylistManager.addToPlaylist(newPlId, item, newState)
                         onLibraryUpdate(newState)
@@ -1330,6 +1350,7 @@ private fun PlaylistView(
     onMoveUp: (String, Int) -> Unit,
     onMoveDown: (String, Int) -> Unit,
     onRemoveItem: (String, Int) -> Unit,
+    onMoveToPlaylist: (String, Int, String) -> Unit,
     onPlayItem: (MusicItemId, Int) -> Unit
 ) {
     Column {
@@ -1380,7 +1401,10 @@ private fun PlaylistView(
             LazyColumn(Modifier.fillMaxSize()) {
                 itemsIndexed(currentPlaylist.items, key = { idx, item -> "${item.id}_${idx}" }) { idx, item ->
                     val isPlaying = playingPlaylistId == currentPlaylist.id && playingIndex == idx
-                    PlaylistItemView(idx, item, currentPlaylist.id, isPlaying, onMoveUp, onMoveDown, onRemoveItem, onPlayItem)
+                    PlaylistItemView(
+                        idx, item, currentPlaylist.id, isPlaying, library,
+                        onMoveUp, onMoveDown, onRemoveItem, onMoveToPlaylist, onPlayItem
+                    )
                 }
             }
         }
@@ -1393,9 +1417,11 @@ private fun PlaylistItemView(
     item: MusicItemId,
     playlistId: String,
     isPlaying: Boolean,
+    library: LibraryState,
     onMoveUp: (String, Int) -> Unit,
     onMoveDown: (String, Int) -> Unit,
     onRemoveItem: (String, Int) -> Unit,
+    onMoveToPlaylist: (String, Int, String) -> Unit,
     onPlayItem: (MusicItemId, Int) -> Unit
 ) {
     Card(
@@ -1490,6 +1516,31 @@ private fun PlaylistItemView(
                             Spacer(Modifier.width(8.dp))
                             Text("下移")
                         }
+                        
+                        Divider()
+                        
+                        // 移动到其他列表
+                        var moveSubMenuExpanded by remember { mutableStateOf(false) }
+                        DropdownMenuItem({ moveSubMenuExpanded = true }) {
+                            Icon(Icons.Default.Send, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("移动到...")
+                            
+                            DropdownMenu(moveSubMenuExpanded, { moveSubMenuExpanded = false }) {
+                                library.playlists.forEach { pl ->
+                                    if (pl.id != playlistId) {
+                                        DropdownMenuItem({
+                                            onMoveToPlaylist(playlistId, idx, pl.id)
+                                            moveSubMenuExpanded = false
+                                            expanded = false
+                                        }) {
+                                            Text(pl.name)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
                         Divider()
                         DropdownMenuItem({ 
                             onRemoveItem(playlistId, idx)

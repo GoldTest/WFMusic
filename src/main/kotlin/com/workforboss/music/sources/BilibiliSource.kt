@@ -237,6 +237,19 @@ class BilibiliSource : SourceAdapter {
         // 获取视频流，同样选择最高清晰度的
         val bestVideo = playResp.data?.dash?.video?.maxByOrNull { it.id }
         val videoUrl = bestVideo?.baseUrl
+        
+        val videoQualityLabel = when (bestVideo?.id) {
+            127 -> "8K"
+            120 -> "4K"
+            116 -> "1080P60"
+            112 -> "1080P+"
+            80 -> "1080P"
+            74 -> "720P60"
+            64 -> "720P"
+            32 -> "480P"
+            16 -> "360P"
+            else -> if (bestVideo != null) "Unknown(${bestVideo.id})" else null
+        }
 
         val qualityLabel = when (bestAudio?.id) {
             30216 -> "64k"
@@ -247,13 +260,14 @@ class BilibiliSource : SourceAdapter {
             else -> if (bestAudio != null) "Unknown(${bestAudio.id})" else "默认"
         }
         
-        println("Bilibili: Found stream URL ($qualityLabel): ${audioUrl.take(100)}...")
+        println("Bilibili: Found stream URL ($qualityLabel, video: $videoQualityLabel): ${audioUrl.take(100)}...")
         return StreamResult(
             url = audioUrl,
             quality = qualityLabel,
             videoUrl = videoUrl,
             videoWidth = bestVideo?.width,
             videoHeight = bestVideo?.height,
+            videoQuality = videoQualityLabel,
             headers = mapOf(
                 "User-Agent" to commonHeaders["User-Agent"]!!,
                 "Referer" to "https://www.bilibili.com/video/$id",
