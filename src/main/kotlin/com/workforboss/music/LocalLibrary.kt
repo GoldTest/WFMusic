@@ -13,7 +13,8 @@ object LocalLibrary {
                     title = f.nameWithoutExtension,
                     artist = null,
                     album = null,
-                    durationMillis = null
+                    durationMillis = null,
+                    source = "local"
                 )
             }.getOrElse { null }
         }

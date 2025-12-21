@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.workforboss"
-version = "0.1.8"
+version = "0.1.9"
 
 repositories {
     maven("https://maven.aliyun.com/repository/google")
@@ -31,6 +31,12 @@ dependencies {
     implementation("media.kamel:kamel-image:0.9.1")
     implementation("javazoom:jlayer:1.0.1")
     implementation("org.slf4j:slf4j-simple:2.0.12")
+    
+    // JavaFX for AAC/M4A support
+    val jfxVersion = "21"
+    implementation("org.openjfx:javafx-media:$jfxVersion:win")
+    implementation("org.openjfx:javafx-graphics:$jfxVersion:win")
+    implementation("org.openjfx:javafx-base:$jfxVersion:win")
 }
 
 compose.desktop {
@@ -39,7 +45,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Exe, TargetFormat.Msi)
             packageName = "WFMusic"
-            packageVersion = "0.1.8"
+            packageVersion = "0.1.9"
             description = "WFMusic Player"
             copyright = "© 2025 WFMusic. All rights reserved."
             vendor = "WFMusic"

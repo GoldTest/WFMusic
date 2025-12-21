@@ -62,7 +62,7 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
     val focusRequester = remember { FocusRequester() }
 
     // 分平台搜索状态
-    val sources = listOf("all", "local", "netease", "qq", "kugou", "kuwo", "migu", "itunes")
+    val sources = listOf("all", "local", "netease", "qq", "kugou", "kuwo", "migu", "bilibili", "itunes")
     var selectedTab by remember { mutableStateOf(0) }
     val sourceResults = remember { mutableStateMapOf<String, List<Track>>() }
     val sourceLoading = remember { mutableStateMapOf<String, Boolean>() }
@@ -118,20 +118,14 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                 title = nextItem.title,
                                 artist = nextItem.artist,
                                 album = nextItem.album,
-                                durationMillis = nextItem.durationMs
+                                durationMillis = nextItem.durationMs,
+                                source = nextItem.source
                             ))
                         } else {
                             val url = chain.streamUrlFor(nextItem.source, nextItem.id)
                             if (url.isNullOrBlank()) throw Exception("未能获取到有效的播放地址")
                             
-                            // 异步下载到本地，但不阻塞播放
-                            scope.launch(Dispatchers.IO) {
-                                runCatching {
-                                    Storage.downloadMusic(url, localFile)
-                                }
-                            }
-                            
-                            msg = "从网络获取成功，开始播放"
+                            msg = "正在缓冲网络音频..."
                             player.loadOnline(OnlineTrack(
                                 id = nextItem.id, 
                                 title = nextItem.title, 
@@ -139,7 +133,8 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                 album = nextItem.album,
                                 durationMillis = nextItem.durationMs,
                                 previewUrl = url,
-                                coverUrl = nextItem.coverUrl
+                                coverUrl = nextItem.coverUrl,
+                                source = nextItem.source
                             ))
                         }
                         player.play()
@@ -331,7 +326,8 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                                              title = file.nameWithoutExtension,
                                                              artist = "本地歌手",
                                                              album = "本地专辑",
-                                                             durationMillis = 0L
+                                                             durationMillis = 0L,
+                                                             source = "local"
                                                          )
                                                          library = PlaylistManager.addLocalTrack(track, library)
                                                          count++
@@ -613,20 +609,14 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                                 title = item.title,
                                                 artist = item.artist,
                                                 album = item.album,
-                                                durationMillis = item.durationMs
+                                                durationMillis = item.durationMs,
+                                                source = item.source
                                             ))
                                         } else {
                                             val url = chain.streamUrlFor(item.source, item.id)
                                             if (url.isNullOrBlank()) throw Exception("未能获取到有效的播放地址")
                                             
-                                            // 异步下载到本地，但不阻塞播放
-                                            scope.launch(Dispatchers.IO) {
-                                                runCatching {
-                                                    Storage.downloadMusic(url, localFile)
-                                                }
-                                            }
-                                            
-                                            msg = "从网络获取成功，开始播放"
+                                            msg = "正在缓冲网络音频..."
                                             player.loadOnline(OnlineTrack(
                                                 id = item.id, 
                                                 title = item.title, 
@@ -634,7 +624,8 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                                 album = item.album,
                                                 durationMillis = item.durationMs,
                                                 previewUrl = url,
-                                                coverUrl = item.coverUrl
+                                                coverUrl = item.coverUrl,
+                                                source = item.source
                                             ))
                                         }
                                         player.play()
@@ -873,7 +864,8 @@ private fun SearchResultItem(
                             album = t.album,
                             durationMillis = t.durationMs, // 确保传递了 durationMs
                             previewUrl = url,
-                            coverUrl = actualCover
+                            coverUrl = actualCover,
+                            source = t.source
                         )
                         onTrackSelect(actualCover)
                         onClearPlayingContext()

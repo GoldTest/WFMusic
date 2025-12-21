@@ -34,7 +34,8 @@ class ItunesApi {
                 album = it.collectionName,
                 durationMillis = it.trackTimeMillis,
                 previewUrl = it.previewUrl ?: "",
-                coverUrl = it.artworkUrl100
+                coverUrl = it.artworkUrl100,
+                source = "itunes"
             )
         }
     }

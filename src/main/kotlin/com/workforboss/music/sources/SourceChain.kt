@@ -11,9 +11,10 @@ class SourceChain {
         "kugou" to KugouSource(),
         "kuwo" to KuwoSource(),
         "migu" to MiguSource(),
+        "bilibili" to BilibiliSource(),
         "itunes" to ItunesSource()
     )
-    private val order = listOf("netease", "qq", "kugou", "kuwo", "migu", "itunes")
+    private val order = listOf("netease", "qq", "kugou", "kuwo", "migu", "bilibili", "itunes")
 
     suspend fun search(q: String, page: Int = 1): List<Track> = coroutineScope {
         val jobs = order.map { name ->
@@ -27,8 +28,13 @@ class SourceChain {
     suspend fun searchBySource(source: String, q: String, page: Int = 1): List<Track> {
         val ad = adapters[source] ?: return emptyList()
         return runCatching {
-            ad.search(q, page).map { it.copy(source = source) }
-        }.getOrDefault(emptyList())
+            val results = ad.search(q, page).map { it.copy(source = source) }
+            println("Source $source returned ${results.size} results for query: $q")
+            results
+        }.getOrElse {
+            println("Source $source search failed: ${it.message}")
+            emptyList()
+        }
     }
 
     suspend fun streamUrlFor(source: String, id: String): String {

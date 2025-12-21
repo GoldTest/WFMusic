@@ -21,7 +21,8 @@ data class OnlineTrack(
     val album: String? = null,
     val durationMillis: Long? = null,
     val previewUrl: String,
-    val coverUrl: String? = null
+    val coverUrl: String? = null,
+    val source: String
 )
 
 @Serializable
@@ -31,7 +32,8 @@ data class LocalTrack(
     val title: String?,
     val artist: String?,
     val album: String?,
-    val durationMillis: Long? = null
+    val durationMillis: Long? = null,
+    val source: String = "local"
 )
 
 @Serializable

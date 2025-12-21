@@ -21,15 +21,14 @@ object Storage {
     private val cacheDir: File by lazy { File(appDir, "cache").apply { if (!exists()) mkdirs() } }
 
     fun getMusicFile(source: String, id: String): File {
-        // 按照 来源/ID.mp3 存储，确保唯一性
         val sourceDir = File(musicDir, source).apply { if (!exists()) mkdirs() }
-        // 如果是本地音乐，ID 可能已经包含了扩展名，或者我们统一使用 ID
-        return if (source == "local") {
-            // 检查是否已经有扩展名，如果没有则补充
-            if (id.contains(".")) File(sourceDir, id)
-            else File(sourceDir, "$id.mp3")
-        } else {
-            File(sourceDir, "$id.mp3")
+        return when (source) {
+            "local" -> {
+                if (id.contains(".")) File(sourceDir, id)
+                else File(sourceDir, "$id.mp3")
+            }
+            "bilibili", "itunes" -> File(sourceDir, "$id.m4a")
+            else -> File(sourceDir, "$id.mp3")
         }
     }
 
@@ -53,6 +52,8 @@ object Storage {
                 conn.setRequestProperty("Referer", "https://y.qq.com/")
             } else if (url.contains("migu.cn")) {
                 conn.setRequestProperty("Referer", "https://m.music.migu.cn/")
+            } else if (url.contains("bilibili.com") || url.contains("bilivideo.com")) {
+                conn.setRequestProperty("Referer", "https://www.bilibili.com/")
             }
             
             val totalSize = conn.contentLengthLong
