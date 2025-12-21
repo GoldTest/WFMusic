@@ -4,7 +4,7 @@ WFMusic 是一款基于 Kotlin 和 Compose Multiplatform 开发的桌面端聚�
 
 ## ✨ 项目特性
 
-- **聚合搜索**：一键搜索网易云、QQ音乐、酷狗、酷我、咪咕、iTunes 等多个平台的音乐资源。
+- **聚合搜索**：一键搜索网易云、QQ音乐、酷狗、酷我、咪咕、iTunes、Bilibili 等多个平台的音乐资源。
 - **本地管理**：支持导入本地音乐文件，管理你的私人音乐库。
 - **播放列表**：轻松创建、重命名和管理自定义播放列表。
 - **歌词显示**：支持在线匹配并显示歌曲歌词。
@@ -18,7 +18,7 @@ WFMusic 是一款基于 Kotlin 和 Compose Multiplatform 开发的桌面端聚�
 - **UI 框架**：[Compose Multiplatform](https://www.jetbrains.com/lp/compose-multiplatform/)
 - **网络请求**：[Ktor](https://ktor.io/)
 - **图片加载**：[Kamel](https://github.com/Kamel-Media/Kamel)
-- **音频解码**：[JLayer](http://www.javazoom.net/javalayer/javalayer.html)
+- **音频解码**：[JavaFX Media](https://openjfx.io/javadoc/21/javafx.media/javafx/scene/media/package-summary.html) (支持 MP3, AAC/M4A, WAV 等)
 - **序列化**：[Kotlinx Serialization](https://github.com/Kotlin/kotlinx.serialization)
 
 ## 🚀 快速开始

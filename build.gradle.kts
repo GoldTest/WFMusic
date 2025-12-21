@@ -29,7 +29,6 @@ dependencies {
     implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.8")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
     implementation("media.kamel:kamel-image:0.9.1")
-    implementation("javazoom:jlayer:1.0.1")
     implementation("org.slf4j:slf4j-simple:2.0.12")
     
     // JavaFX for AAC/M4A support
