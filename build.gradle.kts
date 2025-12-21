@@ -49,7 +49,7 @@ compose.desktop {
                 menuGroup = "WFMusic"
                 // upgradeUuid 建议固定一个，这样覆盖安装时能识别是同一个应用
                 upgradeUuid = "8c6c9a30-3c1d-4d7e-9e8a-8c6c9a303c1d"
-                iconFile.set(project.file("src/main/resources/icon.png"))
+                iconFile.set(project.file("src/main/resources/icon.ico"))
             }
         }
     }
