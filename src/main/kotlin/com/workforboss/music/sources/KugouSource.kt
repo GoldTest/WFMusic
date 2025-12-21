@@ -56,7 +56,7 @@ class KugouSource : SourceAdapter {
 
     private val emptyJsonArray = JsonArray(emptyList())
 
-    override suspend fun streamUrl(id: String): String {
+    override suspend fun streamUrl(id: String): StreamResult {
         // 1. 尝试酷狗官方接口 (含签名)
         val hash = id.lowercase()
         val key = md5("${hash}kgcloudv2")
@@ -88,7 +88,7 @@ class KugouSource : SourceAdapter {
                 } else null
             }.getOrNull()
             
-            if (!res.isNullOrBlank()) return res
+            if (!res.isNullOrBlank()) return StreamResult(res, "128k")
         }
 
         // 2. 尝试代理接口
@@ -105,7 +105,7 @@ class KugouSource : SourceAdapter {
                     }.body()
                     val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
                     val playUrl = json.jsonObject["url"]?.jsonPrimitive?.content
-                    if (!playUrl.isNullOrBlank() && playUrl.startsWith("http")) playUrl else null
+                    if (!playUrl.isNullOrBlank() && playUrl.startsWith("http")) StreamResult(playUrl, "标准") else null
                 } else if (p.contains("liuzhijin")) {
                     val resp: String = client.get(p) {
                         parameter("type", "url")
@@ -114,13 +114,13 @@ class KugouSource : SourceAdapter {
                     }.body()
                     val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
                     val playUrl = json.jsonObject["data"]?.jsonObject?.get("url")?.jsonPrimitive?.content
-                    if (!playUrl.isNullOrBlank() && playUrl.startsWith("http")) playUrl else null
+                    if (!playUrl.isNullOrBlank() && playUrl.startsWith("http")) StreamResult(playUrl, "标准") else null
                 } else null
             }.getOrNull()
             if (url != null) return url
         }
 
-        return ""
+        return StreamResult("")
     }
 
     suspend fun getCover(id: String): String? {

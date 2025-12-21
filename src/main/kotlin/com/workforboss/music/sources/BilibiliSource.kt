@@ -177,6 +177,7 @@ class BilibiliSource : SourceAdapter {
                     album = "Bilibili",
                     durationMs = parseDuration(item.duration),
                     coverUrl = if (item.pic.startsWith("//")) "https:${item.pic}" else item.pic,
+                    quality = "待解析",
                     source = "bilibili"
                 )
             }
@@ -189,7 +190,7 @@ class BilibiliSource : SourceAdapter {
 
     private fun cleanTitle(title: String) = title.replace(Regex("<[^>]*>"), "").replace("&amp;", "&").replace("&quot;", "\"")
 
-    override suspend fun streamUrl(id: String): String {
+    override suspend fun streamUrl(id: String): StreamResult {
         ensureBuvid()
         println("Bilibili: Getting stream URL for $id")
         val viewResp: BilibiliViewResp = client.get("https://api.bilibili.com/x/web-interface/view") {
@@ -224,16 +225,26 @@ class BilibiliSource : SourceAdapter {
             throw IllegalStateException("Bilibili PlayURL API error: ${playResp.code}")
         }
         
-        // 优先获取音频流
-        val audioUrl = playResp.data?.dash?.audio?.firstOrNull()?.baseUrl
-            ?: playResp.data?.durl?.firstOrNull()?.url
+        // 优先获取音频流，选择 ID 最大的（音质最高）
+        val bestAudio = playResp.data?.dash?.audio?.maxByOrNull { it.id }
+        val audioUrl = bestAudio?.baseUrl ?: playResp.data?.durl?.firstOrNull()?.url
             
         if (audioUrl == null) {
             println("Bilibili: No audio stream found for $id. Response: $playResp")
             throw IllegalStateException("Audio URL not found")
         }
-        println("Bilibili: Found stream URL: ${audioUrl.take(100)}...")
-        return audioUrl
+
+        val qualityLabel = when (bestAudio?.id) {
+            30216 -> "64k"
+            30232 -> "128k"
+            30280 -> "320k"
+            30250 -> "杜比全景声"
+            30251 -> "Hi-Res"
+            else -> if (bestAudio != null) "Unknown(${bestAudio.id})" else "默认"
+        }
+        
+        println("Bilibili: Found stream URL ($qualityLabel): ${audioUrl.take(100)}...")
+        return StreamResult(audioUrl, qualityLabel)
     }
 
     override suspend fun lyrics(id: String): String? = null

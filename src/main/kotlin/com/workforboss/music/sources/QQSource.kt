@@ -101,7 +101,7 @@ class QQSource : SourceAdapter {
 
     private val emptyJsonArray = JsonArray(emptyList())
 
-    override suspend fun streamUrl(id: String): String {
+    override suspend fun streamUrl(id: String): StreamResult {
         // 1. 尝试直接获取 (使用官方 musicu 接口, 使用 GET 方式)
         val platforms = listOf(
             // platform, ua, filename_prefix
@@ -141,11 +141,12 @@ class QQSource : SourceAdapter {
                 
                 if (!purl.isNullOrBlank() && !purl.contains("trial=1") && (purl.startsWith("C400") || purl.startsWith("M500"))) {
                     val finalSip = if (sip.startsWith("http://")) sip.replace("http://", "https://") else sip
-                    "${finalSip}${purl}"
+                    val quality = if (purl.startsWith("M500")) "128k" else "标准"
+                    StreamResult("${finalSip}${purl}", quality)
                 } else null
             }.getOrNull()
             
-            if (!url.isNullOrBlank()) return url
+            if (url != null) return url
         }
 
         // 2. 尝试代理接口
@@ -166,7 +167,7 @@ class QQSource : SourceAdapter {
                     }.body()
                     val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
                     val playUrl = json.jsonObject["url"]?.jsonPrimitive?.content ?: json.jsonObject["play_url"]?.jsonPrimitive?.content
-                    if (!playUrl.isNullOrBlank() && playUrl.startsWith("http")) playUrl else null
+                    if (!playUrl.isNullOrBlank() && playUrl.startsWith("http")) StreamResult(playUrl, "标准") else null
                 } else if (b.contains("injahow.cn")) {
                     val resp: String = client.get(b) {
                         parameter("type", "url")
@@ -176,7 +177,7 @@ class QQSource : SourceAdapter {
                     }.body()
                     val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
                     val playUrl = json.jsonObject["url"]?.jsonPrimitive?.content
-                    if (!playUrl.isNullOrBlank() && playUrl.startsWith("http")) playUrl else null
+                    if (!playUrl.isNullOrBlank() && playUrl.startsWith("http")) StreamResult(playUrl, "标准") else null
                 } else if (b.contains("liuzhijin")) {
                     val resp: String = client.get(b) {
                         parameter("type", "url")
@@ -185,27 +186,29 @@ class QQSource : SourceAdapter {
                     }.body()
                     val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
                     val playUrl = json.jsonObject["data"]?.jsonObject?.get("url")?.jsonPrimitive?.content
-                    if (!playUrl.isNullOrBlank() && playUrl.startsWith("http")) playUrl else null
+                    if (!playUrl.isNullOrBlank() && playUrl.startsWith("http")) StreamResult(playUrl, "标准") else null
                 } else if (b.contains("leafone")) {
                     val resp: String = client.get(b) {
                         parameter("type", "qq")
                         parameter("id", id)
                     }.body()
                     val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
-                    json.jsonObject["data"]?.jsonObject?.get("url")?.jsonPrimitive?.content
+                    val playUrl = json.jsonObject["data"]?.jsonObject?.get("url")?.jsonPrimitive?.content
+                    if (playUrl != null) StreamResult(playUrl, "标准") else null
                 } else if (b.contains("yujn")) {
                     val resp: String = client.get(b) {
                         parameter("id", id)
                         parameter("type", "json")
                     }.body()
                     val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
-                    json.jsonObject["data"]?.jsonObject?.get("url")?.jsonPrimitive?.content
+                    val playUrl = json.jsonObject["data"]?.jsonObject?.get("url")?.jsonPrimitive?.content
+                    if (playUrl != null) StreamResult(playUrl, "标准") else null
                 } else null
             }.getOrNull()
             if (url != null) return url
         }
         
-        return ""
+        return StreamResult("")
     }
 
     override suspend fun lyrics(id: String): String? {

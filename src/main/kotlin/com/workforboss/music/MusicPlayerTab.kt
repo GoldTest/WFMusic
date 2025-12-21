@@ -62,7 +62,7 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
     val focusRequester = remember { FocusRequester() }
 
     // 分平台搜索状态
-    val sources = listOf("all", "local", "netease", "qq", "kugou", "kuwo", "migu", "bilibili", "itunes")
+    val sources = listOf("all", "local", "bilibili", "netease", "qq", "kugou", "kuwo", "migu", "itunes")
     var selectedTab by remember { mutableStateOf(0) }
     val sourceResults = remember { mutableStateMapOf<String, List<Track>>() }
     val sourceLoading = remember { mutableStateMapOf<String, Boolean>() }
@@ -92,6 +92,11 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
     }
     var playingPlaylistId by remember { mutableStateOf<String?>(null) }
     var playingIndex by remember { mutableStateOf(-1) }
+    val currentItem = remember(playingPlaylistId, playingIndex, library) {
+        playingPlaylistId?.let { pid ->
+            library.playlists.find { it.id == pid }?.items?.getOrNull(playingIndex)
+        }
+    }
     var showRenameDialog by remember { mutableStateOf<String?>(null) } // playlistId
 
     // 定义播放下一首的逻辑
@@ -122,18 +127,19 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                 source = nextItem.source
                             ))
                         } else {
-                            val url = chain.streamUrlFor(nextItem.source, nextItem.id)
-                            if (url.isNullOrBlank()) throw Exception("未能获取到有效的播放地址")
+                            val stream = chain.streamUrlFor(nextItem.source, nextItem.id)
+                            if (stream.url.isBlank()) throw Exception("未能获取到有效的播放地址")
                             
-                            msg = "正在缓冲网络音频..."
+                            msg = "正在缓冲网络音频 (${stream.quality ?: "标准"})..."
                             player.loadOnline(OnlineTrack(
                                 id = nextItem.id, 
                                 title = nextItem.title, 
                                 artist = nextItem.artist, 
                                 album = nextItem.album,
                                 durationMillis = nextItem.durationMs,
-                                previewUrl = url,
+                                previewUrl = stream.url,
                                 coverUrl = nextItem.coverUrl,
+                                quality = stream.quality ?: nextItem.quality,
                                 source = nextItem.source
                             ))
                         }
@@ -485,6 +491,20 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                         onClearPlayingContext = {
                                             playingPlaylistId = null
                                             playingIndex = -1
+                                        },
+                                        onQualityUpdate = { newQuality ->
+                                            val list = sourceResults[t.source]
+                                            if (list != null) {
+                                                sourceResults[t.source] = list.map { 
+                                                    if (it.id == t.id) it.copy(quality = newQuality) else it
+                                                }
+                                            }
+                                            val allList = sourceResults["all"]
+                                            if (allList != null) {
+                                                sourceResults["all"] = allList.map { 
+                                                    if (it.id == t.id && it.source == t.source) it.copy(quality = newQuality) else it
+                                                }
+                                            }
                                         }
                                     )
                                 }
@@ -512,7 +532,24 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                     shape = RoundedCornerShape(16.dp)
                 ) {
                     Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("正在播放", style = MaterialTheme.typography.subtitle1)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("正在播放", style = MaterialTheme.typography.subtitle1)
+                            currentItem?.quality?.let { q ->
+                                Spacer(Modifier.width(8.dp))
+                                Surface(
+                                    color = MaterialTheme.colors.secondary.copy(alpha = 0.1f),
+                                    shape = RoundedCornerShape(4.dp),
+                                    border = BorderStroke(0.5.dp, MaterialTheme.colors.secondary.copy(alpha = 0.5f))
+                                ) {
+                                    Text(
+                                        q,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                        style = MaterialTheme.typography.caption.copy(fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
+                                        color = MaterialTheme.colors.secondary
+                                    )
+                                }
+                            }
+                        }
                         Spacer(Modifier.height(12.dp))
                         
                         // 封面区域
@@ -613,18 +650,19 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                                 source = item.source
                                             ))
                                         } else {
-                                            val url = chain.streamUrlFor(item.source, item.id)
-                                            if (url.isNullOrBlank()) throw Exception("未能获取到有效的播放地址")
+                                            val stream = chain.streamUrlFor(item.source, item.id)
+                                            if (stream.url.isBlank()) throw Exception("未能获取到有效的播放地址")
                                             
-                                            msg = "正在缓冲网络音频..."
+                                            msg = "正在缓冲网络音频 (${stream.quality ?: "标准"})..."
                                             player.loadOnline(OnlineTrack(
-                                                id = item.id, 
-                                                title = item.title, 
-                                                artist = item.artist, 
+                                                id = item.id,
+                                                title = item.title,
+                                                artist = item.artist,
                                                 album = item.album,
                                                 durationMillis = item.durationMs,
-                                                previewUrl = url,
+                                                previewUrl = stream.url,
                                                 coverUrl = item.coverUrl,
+                                                quality = stream.quality ?: item.quality,
                                                 source = item.source
                                             ))
                                         }
@@ -773,7 +811,8 @@ private fun SearchResultItem(
     onTrackSelect: (String?) -> Unit,
     onLibraryUpdate: (LibraryState) -> Unit,
     onMsg: (String) -> Unit,
-    onClearPlayingContext: () -> Unit
+    onClearPlayingContext: () -> Unit,
+    onQualityUpdate: (String) -> Unit = {}
 ) {
     var loadingUrl by remember { mutableStateOf(false) }
     Card(
@@ -829,16 +868,26 @@ private fun SearchResultItem(
                         color = sourceColor,
                         shape = RoundedCornerShape(4.dp)
                     ) {
+                        Text(t.source.uppercase(), modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp), style = MaterialTheme.typography.caption.copy(fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Color.White)
+                }
+                if (!t.quality.isNullOrBlank()) {
+                    Spacer(Modifier.width(4.dp))
+                    Surface(
+                        color = MaterialTheme.colors.secondary.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(4.dp),
+                        border = BorderStroke(0.5.dp, MaterialTheme.colors.secondary.copy(alpha = 0.5f))
+                    ) {
                         Text(
-                            t.source.uppercase(),
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.caption.copy(fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
-                            color = Color.White
+                            t.quality,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                            style = MaterialTheme.typography.caption.copy(fontSize = 9.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
+                            color = MaterialTheme.colors.secondary
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
-                    Text("${t.artist} · ${t.album ?: "未知专辑"}", style = MaterialTheme.typography.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+                Spacer(Modifier.width(8.dp))
+                Text("${t.artist} · ${t.album ?: "未知专辑"}", style = MaterialTheme.typography.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             }
             
             IconButton(
@@ -848,11 +897,14 @@ private fun SearchResultItem(
                     loadingUrl = true
                     onMsg("正在获取播放链接: ${t.title}...")
                     runCatching {
-                        val url = chain.streamUrlFor(t.source, t.id)
-                        if (url.isNullOrBlank()) {
+                        val stream = chain.streamUrlFor(t.source, t.id)
+                        if (stream.url.isBlank()) {
                             throw Exception("未能获取到有效的播放地址")
                         }
-                        onMsg("成功获取链接，开始播放: ${t.title}")
+                        if (stream.quality != null) {
+                            onQualityUpdate(stream.quality)
+                        }
+                        onMsg("成功获取链接 (${stream.quality ?: "标准"}), 开始播放: ${t.title}")
                         var actualCover = t.coverUrl
                         if (actualCover.isNullOrBlank()) {
                             actualCover = chain.coverFor(t.source, t.id)
@@ -863,8 +915,9 @@ private fun SearchResultItem(
                             artist = t.artist,
                             album = t.album,
                             durationMillis = t.durationMs, // 确保传递了 durationMs
-                            previewUrl = url,
+                            previewUrl = stream.url,
                             coverUrl = actualCover,
+                            quality = stream.quality ?: t.quality,
                             source = t.source
                         )
                         onTrackSelect(actualCover)
@@ -901,7 +954,8 @@ private fun SearchResultItem(
                                 artist = t.artist,
                                 album = t.album,
                                 durationMs = t.durationMs,
-                                coverUrl = t.coverUrl
+                                coverUrl = t.coverUrl,
+                                quality = t.quality
                             )
                             val newState = PlaylistManager.addToPlaylist(pl.id, item, library)
                             onLibraryUpdate(newState)
@@ -921,7 +975,8 @@ private fun SearchResultItem(
                             artist = t.artist,
                             album = t.album,
                             durationMs = t.durationMs,
-                            coverUrl = t.coverUrl
+                            coverUrl = t.coverUrl,
+                            quality = t.quality
                         )
                         newState = PlaylistManager.addToPlaylist(newPlId, item, newState)
                         onLibraryUpdate(newState)

@@ -99,7 +99,7 @@ class NeteaseSource : SourceAdapter {
         return emptyList()
     }
 
-    override suspend fun streamUrl(id: String): String {
+    override suspend fun streamUrl(id: String): StreamResult {
         // 先尝试直连官方接口获取播放地址
         val directUrl = runCatching {
             val data: NeteaseUrlResp = client.get("https://music.163.com/api/song/enhance/player/url") {
@@ -112,7 +112,7 @@ class NeteaseSource : SourceAdapter {
             data.data?.firstOrNull()?.url
         }.getOrNull()
 
-        if (!directUrl.isNullOrBlank()) return directUrl
+        if (!directUrl.isNullOrBlank()) return StreamResult(directUrl, "320k")
 
         // 回退到代理
         for (b in bases) {
@@ -123,7 +123,7 @@ class NeteaseSource : SourceAdapter {
                 }.body()
                 data.data?.firstOrNull()?.url
             }.getOrNull()
-            if (!url.isNullOrBlank()) return url
+            if (!url.isNullOrBlank()) return StreamResult(url, "标准")
         }
         throw IllegalStateException("netease url not found")
     }

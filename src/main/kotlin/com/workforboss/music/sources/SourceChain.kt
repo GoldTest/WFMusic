@@ -37,7 +37,7 @@ class SourceChain {
         }
     }
 
-    suspend fun streamUrlFor(source: String, id: String): String {
+    suspend fun streamUrlFor(source: String, id: String): StreamResult {
         val ad = adapters[source] ?: throw IllegalArgumentException("unknown source: $source")
         return ad.streamUrl(id)
     }

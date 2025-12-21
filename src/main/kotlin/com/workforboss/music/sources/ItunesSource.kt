@@ -45,12 +45,13 @@ class ItunesSource : SourceAdapter {
         }
     }
 
-    override suspend fun streamUrl(id: String): String {
+    override suspend fun streamUrl(id: String): StreamResult {
         val url = "https://itunes.apple.com/lookup?id=$id"
         val respStr = client.get(url).bodyAsText()
         val data = json.decodeFromString<SearchResponse>(respStr)
         val item = data.results.firstOrNull()
-        return item?.previewUrl ?: throw IllegalStateException("preview url not found")
+        val previewUrl = item?.previewUrl ?: throw IllegalStateException("preview url not found")
+        return StreamResult(previewUrl, "256k")
     }
 
     override suspend fun lyrics(id: String): String? = null

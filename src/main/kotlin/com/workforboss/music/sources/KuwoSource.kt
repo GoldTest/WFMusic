@@ -58,7 +58,7 @@ class KuwoSource : SourceAdapter {
         }
     }
 
-    override suspend fun streamUrl(id: String): String {
+    override suspend fun streamUrl(id: String): StreamResult {
         // 尝试多个酷我公开链接获取地址
         val urls = listOf(
             "http://antiserver.kuwo.cn/anti.s?format=mp3&rid=MUSIC_$id&type=convert_url&response=url",
@@ -70,7 +70,7 @@ class KuwoSource : SourceAdapter {
                 val resp: String = client.get(u).body()
                 if (resp.startsWith("http")) resp else null
             }.getOrNull()
-            if (!res.isNullOrBlank()) return res
+            if (!res.isNullOrBlank()) return StreamResult(res, "标准")
         }
 
         throw IllegalStateException("kuwo url not found")

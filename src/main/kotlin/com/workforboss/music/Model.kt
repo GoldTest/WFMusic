@@ -10,7 +10,8 @@ data class MusicItemId(
     val artist: String = "",
     val album: String? = null,
     val durationMs: Long? = null,
-    val coverUrl: String? = null
+    val coverUrl: String? = null,
+    val quality: String? = null
 )
 
 @Serializable
@@ -22,6 +23,7 @@ data class OnlineTrack(
     val durationMillis: Long? = null,
     val previewUrl: String,
     val coverUrl: String? = null,
+    val quality: String? = null,
     val source: String
 )
 

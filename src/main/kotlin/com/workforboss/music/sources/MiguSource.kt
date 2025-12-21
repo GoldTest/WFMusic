@@ -71,7 +71,7 @@ class MiguSource : SourceAdapter {
 
     private val emptyJsonArray = JsonArray(emptyList())
 
-    override suspend fun streamUrl(id: String): String {
+    override suspend fun streamUrl(id: String): StreamResult {
         val ids = id.split("|")
         val copyrightId = ids[0]
         val contentId = if (ids.size > 1) ids[1] else ""
@@ -91,7 +91,7 @@ class MiguSource : SourceAdapter {
                     if (it.startsWith("//")) "https:$it" else it
                 }
             }.getOrNull()
-            if (!listenUrl.isNullOrBlank()) return listenUrl
+            if (!listenUrl.isNullOrBlank()) return StreamResult(listenUrl, "标准")
         }
 
         // 2. 尝试官方 v3 播放接口 (模拟网页版点击)
@@ -107,7 +107,7 @@ class MiguSource : SourceAdapter {
                 if (it.startsWith("//")) "https:$it" else it
             }
         }.getOrNull()
-        if (!v3Url.isNullOrBlank()) return v3Url
+        if (!v3Url.isNullOrBlank()) return StreamResult(v3Url, "标准")
 
         // 3. 尝试资源详情接口获取
         val infoUrl = runCatching {
@@ -130,7 +130,7 @@ class MiguSource : SourceAdapter {
             url?.replace("ftp://218.200.160.122:21", "https://freetyst.nf.migu.cn")
                ?.replace("http://", "https://")
         }.getOrNull()
-        if (!infoUrl.isNullOrBlank()) return infoUrl
+        if (!infoUrl.isNullOrBlank()) return StreamResult(infoUrl, "标准")
 
         // 4. 兜底尝试代理接口
         val proxies = listOf(
@@ -154,10 +154,10 @@ class MiguSource : SourceAdapter {
                     json.jsonObject["url"]?.jsonPrimitive?.content ?: json.jsonObject["play_url"]?.jsonPrimitive?.content
                 }
             }.getOrNull()
-            if (!url.isNullOrBlank() && url.startsWith("http")) return url
+            if (!url.isNullOrBlank() && url.startsWith("http")) return StreamResult(url, "标准")
         }
 
-        return ""
+        return StreamResult("")
     }
 
     override suspend fun lyrics(id: String): String? = null
