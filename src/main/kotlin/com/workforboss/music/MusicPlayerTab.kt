@@ -390,18 +390,18 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
 
                         LazyColumn(Modifier.fillMaxSize()) {
                             if (sources[selectedTab] == "local") {
-                                items(library.localTracks) { lt ->
+                                items(library.localTracks, key = { it.id }) { lt ->
                                     LocalTrackItem(
                                         lt = lt,
                                         player = player,
                                         scope = scope,
                                         library = library,
+                                        onTrackSelect = { coverUrl = it },
                                         onLibraryUpdate = {
                                             library = it
                                             Storage.saveLibrary(it)
                                         },
                                         onMsg = { msg = it },
-                                        onTrackSelect = { coverUrl = it },
                                         onClearPlayingContext = {
                                             playingPlaylistId = null
                                             playingIndex = -1
@@ -409,7 +409,7 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                     )
                                 }
                             } else {
-                                items(currentResults) { t ->
+                                items(currentResults, key = { it.id + it.source }) { t ->
                                     SearchResultItem(
                                         t = t,
                                         chain = chain,
@@ -454,7 +454,7 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                             val currentCover = coverUrl
                             if (currentCover != null) {
                                 KamelImage(
-                                    resource = asyncPainterResource(currentCover),
+                                    resource = asyncPainterResource(currentCover, key = currentCover),
                                     contentDescription = "Current Cover",
                                     modifier = Modifier.fillMaxHeight().aspectRatio(1f).padding(8.dp).background(Color.White, RoundedCornerShape(8.dp)).padding(2.dp),
                                     contentScale = ContentScale.Crop,
@@ -734,7 +734,7 @@ private fun SearchResultItem(
                     CircularProgressIndicator(modifier = Modifier.padding(12.dp), strokeWidth = 2.dp)
                 } else if (!t.coverUrl.isNullOrBlank()) {
                     KamelImage(
-                        resource = asyncPainterResource(t.coverUrl),
+                        resource = asyncPainterResource(t.coverUrl, key = t.coverUrl),
                         contentDescription = "Cover",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop,
@@ -1138,7 +1138,7 @@ private fun PlaylistView(
             }
             
             LazyColumn(Modifier.fillMaxSize()) {
-                itemsIndexed(currentPlaylist.items) { idx, item ->
+                itemsIndexed(currentPlaylist.items, key = { idx, item -> "${item.id}_${idx}" }) { idx, item ->
                     val isPlaying = playingPlaylistId == currentPlaylist.id && playingIndex == idx
                     PlaylistItemView(idx, item, currentPlaylist.id, isPlaying, onMoveUp, onMoveDown, onRemoveItem, onPlayItem)
                 }
