@@ -10,9 +10,9 @@ import java.nio.file.StandardCopyOption
 object Storage {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
     private val appDir: File by lazy {
-        // 使用用户文档目录下的 WorkForBoss 文件夹，而不是用户根目录下的隐藏文件夹
+        // 使用用户文档目录下的 WFMusic 文件夹，而不是用户根目录下的隐藏文件夹
         val documentsDir = File(System.getProperty("user.home"), "Documents")
-        val dir = File(documentsDir, "WorkForBoss")
+        val dir = File(documentsDir, "WFMusic")
         if (!dir.exists()) dir.mkdirs()
         dir
     }

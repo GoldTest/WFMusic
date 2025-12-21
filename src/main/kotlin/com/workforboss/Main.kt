@@ -278,7 +278,7 @@ fun main() = application {
 
     Window(
         onCloseRequest = { isVisible = false },
-        title = "WorkForBoss",
+        title = "WFMusic",
         icon = appIcon,
         visible = isVisible,
         state = rememberWindowState(
@@ -293,7 +293,7 @@ fun main() = application {
     Tray(
         state = trayState,
         icon = appIcon,
-        tooltip = "WorkForBoss",
+        tooltip = "WFMusic",
         onAction = { isVisible = true },
         menu = {
             Item("Show Window", onClick = { isVisible = true })
