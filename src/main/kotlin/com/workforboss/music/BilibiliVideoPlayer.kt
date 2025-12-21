@@ -109,7 +109,7 @@ class BilibiliVideoPlayer(
             onCloseRequest = { closeVideo() },
             state = windowState,
             title = "Bilibili Video - ${track.title}",
-            alwaysOnTop = true
+            alwaysOnTop = false
         ) {
             Box(Modifier.fillMaxSize()) {
                 key(track.id) {
