@@ -664,6 +664,35 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                     runCatching {
                                         // 策略：如果是播放列表中的音乐，优先检查本地文件
                                         val localFile = Storage.getMusicFile(item.source, item.id)
+                                        
+                                        // 对于 B 站，即使音频有本地缓存，我们也可能需要解析出 videoUrl 以便播放视频
+                                        var currentVideoUrl = item.videoUrl
+                                        var currentHeaders = item.headers
+                                        var currentWidth = item.videoWidth
+                                        var currentHeight = item.videoHeight
+
+                                        if (item.source == "bilibili" && currentVideoUrl == null) {
+                                            try {
+                                                val stream = chain.streamUrlFor(item.source, item.id)
+                                                currentVideoUrl = stream.videoUrl
+                                                currentHeaders = stream.headers
+                                                currentWidth = stream.videoWidth
+                                                currentHeight = stream.videoHeight
+                                                
+                                                // 保存回播放列表，避免下次再解析
+                                                val updatedItem = item.copy(
+                                                    videoUrl = currentVideoUrl,
+                                                    headers = currentHeaders,
+                                                    videoWidth = currentWidth,
+                                                    videoHeight = currentHeight
+                                                )
+                                                library = PlaylistManager.updatePlaylistItem(selectedPlaylistId!!, idx, updatedItem, library)
+                                                Storage.saveLibrary(library)
+                                            } catch (e: Exception) {
+                                                println("Playlist play: Failed to fetch video info: ${e.message}")
+                                            }
+                                        }
+
                                         if (localFile.exists()) {
                                             msg = "正在播放本地缓存: ${item.title}"
                                             player.loadLocal(LocalTrack(
@@ -680,14 +709,14 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                                 artist = item.artist,
                                                 album = item.album,
                                                 durationMillis = item.durationMs,
-                                                previewUrl = "", // 本地播放不需要 previewUrl
+                                                previewUrl = "", 
                                                 coverUrl = item.coverUrl,
                                                 quality = item.quality,
                                                 source = item.source,
-                                                videoUrl = item.videoUrl,
-                                                videoWidth = item.videoWidth,
-                                                videoHeight = item.videoHeight,
-                                                headers = item.headers
+                                                videoUrl = currentVideoUrl,
+                                                videoWidth = currentWidth,
+                                                videoHeight = currentHeight,
+                                                headers = currentHeaders
                                             ))
                                         } else {
                                             val stream = chain.streamUrlFor(item.source, item.id)
@@ -1006,15 +1035,30 @@ private fun SearchResultItem(
                                 album = t.album,
                                 durationMs = t.durationMs,
                                 coverUrl = t.coverUrl,
-                                quality = t.quality,
-                                videoUrl = null,
-                                videoWidth = null,
-                                videoHeight = null,
-                                headers = null
+                                quality = t.quality
                             )
                             val newState = PlaylistManager.addToPlaylist(pl.id, item, library)
                             onLibraryUpdate(newState)
                             onMsg("已添加到列表: ${pl.name}")
+                            
+                            // 后台触发缓存
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    val stream = chain.streamUrlFor(t.source, t.id)
+                                    val audioFile = Storage.getMusicFile(t.source, t.id)
+                                    if (!audioFile.exists()) {
+                                        Storage.downloadMusic(stream.url, audioFile)
+                                    }
+                                    if (t.source == "bilibili" && stream.videoUrl != null) {
+                                        val videoFile = Storage.getVideoFile(t.source, t.id)
+                                        if (!videoFile.exists()) {
+                                            Storage.downloadMusic(stream.videoUrl, videoFile)
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    println("Background cache failed: ${e.message}")
+                                }
+                            }
                             expanded = false
                         }) { Text(pl.name) }
                     }
@@ -1031,15 +1075,30 @@ private fun SearchResultItem(
                             album = t.album,
                             durationMs = t.durationMs,
                             coverUrl = t.coverUrl,
-                            quality = t.quality,
-                            videoUrl = null,
-                            videoWidth = null,
-                            videoHeight = null,
-                            headers = null
+                            quality = t.quality
                         )
                         newState = PlaylistManager.addToPlaylist(newPlId, item, newState)
                         onLibraryUpdate(newState)
                         onMsg("已创建新列表并添加: $newPlaylistName")
+                        
+                        // 后台触发缓存
+                        scope.launch(Dispatchers.IO) {
+                            try {
+                                val stream = chain.streamUrlFor(t.source, t.id)
+                                val audioFile = Storage.getMusicFile(t.source, t.id)
+                                if (!audioFile.exists()) {
+                                    Storage.downloadMusic(stream.url, audioFile)
+                                }
+                                if (t.source == "bilibili" && stream.videoUrl != null) {
+                                    val videoFile = Storage.getVideoFile(t.source, t.id)
+                                    if (!videoFile.exists()) {
+                                        Storage.downloadMusic(stream.videoUrl, videoFile)
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                println("Background cache failed: ${e.message}")
+                            }
+                        }
                         expanded = false
                     }) {
                         Row(verticalAlignment = Alignment.CenterVertically) {

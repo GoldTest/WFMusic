@@ -60,5 +60,15 @@ object PlaylistManager {
     fun removeLocalTrack(id: String, state: LibraryState): LibraryState {
         return state.copy(localTracks = state.localTracks.filterNot { it.id == id })
     }
+
+    fun updatePlaylistItem(playlistId: String, index: Int, newItem: MusicItemId, state: LibraryState): LibraryState {
+        return state.copy(playlists = state.playlists.map { pl ->
+            if (pl.id == playlistId) {
+                pl.copy(items = pl.items.toMutableList().also { 
+                    if (index in it.indices) it[index] = newItem
+                })
+            } else pl
+        })
+    }
 }
 

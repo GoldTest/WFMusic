@@ -97,15 +97,13 @@ class BilibiliVideoPlayer(
                             if (videoFile.exists()) {
                                 println("BilibiliVideoPlayer: Using local video file")
                                 startPlaying(videoFile.toURI().toString(), root)
-                            } else if (partFile.exists() && partFile.length() > 1024 * 1024 * 2) { // 超过 2MB 尝试播放缓存
+                            } else if (partFile.exists() && partFile.length() > 1024 * 1024 * 1) { // 降低门槛：1MB 即可开始播放
                                 println("BilibiliVideoPlayer: Using part video file")
                                 startPlaying(partFile.toURI().toString(), root)
-                            } else if (track.videoUrl != null) {
-                                println("BilibiliVideoPlayer: Streaming from online URL")
-                                startPlaying(track.videoUrl!!, root)
                             } else {
-                                showStatus("视频流准备中...", root)
-                                // 启动一个监听，等文件出来
+                                // B 站流需要 Referer 才能播放，JavaFX Media 不支持 header。
+                                // 所以我们直接进入 fallback 模式，让 Storage 下载并播放文件。
+                                showStatus("正在请求视频流...", root)
                                 triggerFallback(root)
                             }
                         }
@@ -151,7 +149,7 @@ class BilibiliVideoPlayer(
                 attempts++
                 
                 // 如果缓冲够了，尝试播放
-                if (partFile.exists() && partFile.length() > 1024 * 1024 * 3) {
+                if (partFile.exists() && partFile.length() > 1024 * 1024 * 1.5) {
                     break
                 }
             }
@@ -159,7 +157,7 @@ class BilibiliVideoPlayer(
             if (isActive) {
                 if (videoFile.exists()) {
                     startPlaying(videoFile.toURI().toString(), root)
-                } else if (partFile.exists() && partFile.length() > 1024 * 1024 * 2) {
+                } else if (partFile.exists() && partFile.length() > 1024 * 1024 * 1) {
                     startPlaying(partFile.toURI().toString(), root)
                 } else {
                     showStatus("视频加载超时，请检查网络。", root)

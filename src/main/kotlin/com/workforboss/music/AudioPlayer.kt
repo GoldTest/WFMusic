@@ -113,6 +113,22 @@ class AudioPlayer {
         currentPath = track.path
         _durationSec.value = track.durationMillis?.let { it / 1000.0 }
         
+        // 检查是否需要后台下载视频 (针对 B 站收藏播放)
+        if (onlineInfo != null && onlineInfo.source == "bilibili" && onlineInfo.videoUrl != null) {
+            val videoFile = Storage.getVideoFile(onlineInfo.source, onlineInfo.id)
+            if (!videoFile.exists()) {
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        println("AudioPlayer: Background downloading video for ${onlineInfo.id} (from local audio play)")
+                        Storage.downloadMusic(onlineInfo.videoUrl, videoFile)
+                        println("AudioPlayer: Background video download finished for ${onlineInfo.id}")
+                    } catch (e: Exception) {
+                        println("AudioPlayer: Background video download failed: ${e.message}")
+                    }
+                }
+            }
+        }
+
         // 增加延迟，确保 native 资源彻底释放
         delay(200)
         
