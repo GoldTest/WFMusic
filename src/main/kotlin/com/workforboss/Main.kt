@@ -254,7 +254,7 @@ fun SettingsView(onClose: () -> Unit) {
                     2 -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                         Spacer(Modifier.height(32.dp))
                         Text("WorkForBoss", style = MaterialTheme.typography.h5, color = MaterialTheme.colors.primary)
-                        Text("版本 0.1.0", style = MaterialTheme.typography.caption)
+                        Text("版本 0.1.8", style = MaterialTheme.typography.caption)
                         Spacer(Modifier.height(16.dp))
                         Text("一个极简且高级的音乐播放器", style = MaterialTheme.typography.body1)
                     }

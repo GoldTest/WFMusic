@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.workforboss"
-version = "0.1.0"
+version = "0.1.8"
 
 repositories {
     maven("https://maven.aliyun.com/repository/google")
@@ -39,7 +39,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Exe, TargetFormat.Msi)
             packageName = "WFMusic"
-            packageVersion = "0.1.0"
+            packageVersion = "0.1.8"
             description = "WFMusic Player"
             copyright = "© 2025 WFMusic. All rights reserved."
             vendor = "WFMusic"
