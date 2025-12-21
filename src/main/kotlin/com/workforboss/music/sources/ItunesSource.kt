@@ -17,8 +17,10 @@ class ItunesSource : SourceAdapter {
     }
     override val name: String = "itunes"
 
-    override suspend fun search(q: String): List<Track> {
-        val url = "https://itunes.apple.com/search?media=music&entity=song&limit=30&term=${URLEncoder.encode(q, "UTF-8")}"
+    override suspend fun search(q: String, page: Int): List<Track> {
+        val limit = 30
+        val offset = (page - 1) * limit
+        val url = "https://itunes.apple.com/search?media=music&entity=song&limit=$limit&offset=$offset&term=${URLEncoder.encode(q, "UTF-8")}"
         val resp: SearchResponse = client.get(url).body()
         return resp.results.map {
             Track(

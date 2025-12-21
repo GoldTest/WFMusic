@@ -23,13 +23,15 @@ class KugouSource : SourceAdapter {
         return digest.joinToString("") { "%02x".format(it) }
     }
 
-    override suspend fun search(q: String): List<Track> {
+    override suspend fun search(q: String, page: Int): List<Track> {
+        val limit = 30
+        val offset = (page - 1) * limit
         val result = runCatching {
             val resp: String = client.get("http://songsearch.kugou.com/song_search_v2") {
                 url {
                     parameters.append("keyword", q)
-                    parameters.append("page", "1")
-                    parameters.append("pagesize", "30")
+                    parameters.append("page", page.toString())
+                    parameters.append("pagesize", limit.toString())
                     parameters.append("format", "json")
                 }
                 header(HttpHeaders.UserAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
@@ -72,8 +74,11 @@ class KugouSource : SourceAdapter {
                 }.body()
                 
                 if (u.contains("play/getdata")) {
-                    val data = Json { ignoreUnknownKeys = true }.decodeFromString<KugouPlayResp>(resp)
-                    data.data?.play_url
+                    val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
+                    val data = json.jsonObject["data"]
+                    if (data is JsonObject) {
+                        data["play_url"]?.jsonPrimitive?.content
+                    } else null
                 } else if (u.contains("getSongInfo")) {
                     val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
                     json.jsonObject["url"]?.jsonPrimitive?.content
@@ -119,12 +124,16 @@ class KugouSource : SourceAdapter {
     }
 
     suspend fun getCover(id: String): String? {
-        val data: KugouPlayResp = client.get("https://www.kugou.com/yy/index.php") {
+        val resp: String = client.get("https://www.kugou.com/yy/index.php") {
             url { parameters.append("r", "play/getdata"); parameters.append("hash", id) }
             header(HttpHeaders.Referrer, "https://www.kugou.com/")
             header(HttpHeaders.UserAgent, "Mozilla/5.0")
         }.body()
-        return data.data?.img
+        val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
+        val data = json.jsonObject["data"]
+        return if (data is JsonObject) {
+            data["img"]?.jsonPrimitive?.content
+        } else null
     }
 
     override suspend fun lyrics(id: String): String? = null
@@ -148,7 +157,4 @@ data class KugouSearchItem(
 )
 @Serializable
 data class KugouTransParam(val union_cover: String? = null)
-@Serializable
-data class KugouPlayResp(val data: KugouPlayData? = null)
-@Serializable
-data class KugouPlayData(val play_url: String? = null, val img: String? = null)
+

@@ -15,7 +15,8 @@ class MiguSource : SourceAdapter {
     }
     override val name: String = "migu"
 
-    override suspend fun search(q: String): List<Track> {
+    override suspend fun search(q: String, page: Int): List<Track> {
+        val limit = 30
         val proxies = listOf(
             "https://api.paugram.com/music",
             "https://api.liuzhijin.cn",
@@ -27,8 +28,8 @@ class MiguSource : SourceAdapter {
                 url {
                     parameters.append("text", q)
                     parameters.append("searchSwitch", "{song:1}")
-                    parameters.append("pageSize", "30")
-                    parameters.append("pageNo", "1")
+                    parameters.append("pageSize", limit.toString())
+                    parameters.append("pageNo", page.toString())
                 }
                 header("Referer", "https://m.music.migu.cn/")
                 header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
@@ -64,55 +65,7 @@ class MiguSource : SourceAdapter {
                 )
             }
         }
-
-        // 2. 尝试代理搜索
-        for (p in proxies) {
-            val result = runCatching {
-                if (p.contains("paugram") || p.contains("v0.pw")) {
-                    val resp: String = client.get(p) {
-                        url {
-                            parameters.append("source", "migu")
-                            parameters.append("name", q)
-                        }
-                    }.body()
-                    val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
-                    val list = if (json is JsonArray) json else json.jsonObject["list"]?.jsonArray ?: emptyJsonArray
-                    list.map { it.jsonObject }
-                } else if (p.contains("liuzhijin")) {
-                    val resp: String = client.get(p) {
-                        url {
-                            parameters.append("type", "search")
-                            parameters.append("word", q)
-                            parameters.append("source", "migu")
-                        }
-                    }.body()
-                    val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
-                    json.jsonObject["data"]?.jsonArray?.map { it.jsonObject } ?: emptyList()
-                } else emptyList()
-            }.getOrNull() ?: emptyList()
-
-            if (result.isNotEmpty()) {
-                return result.map { s ->
-                    Track(
-                        id = s["id"]?.jsonPrimitive?.content ?: s["copyrightId"]?.jsonPrimitive?.content ?: "",
-                        title = s["title"]?.jsonPrimitive?.content ?: s["name"]?.jsonPrimitive?.content ?: s["songName"]?.jsonPrimitive?.content ?: "",
-                        artist = s["artist"]?.jsonPrimitive?.content ?: s["singerName"]?.jsonPrimitive?.content ?: "Unknown",
-                        album = s["album"]?.jsonPrimitive?.content ?: s["albumName"]?.jsonPrimitive?.content,
-                        durationMs = s["duration"]?.jsonPrimitive?.content?.toLongOrNull() 
-                            ?: s["length"]?.jsonPrimitive?.content?.toLongOrNull() 
-                            ?: s["time"]?.jsonPrimitive?.content?.let { t ->
-                                if (t.contains(":")) {
-                                    val parts = t.split(":")
-                                    if (parts.size == 2) (parts[0].toLong() * 60 + parts[1].toLong()) * 1000 else null
-                                } else t.toLongOrNull()
-                            },
-                        coverUrl = s["cover"]?.jsonPrimitive?.content ?: s["pic"]?.jsonPrimitive?.content,
-                        source = "migu"
-                    )
-                }
-            }
-        }
-
+        // ... 其他代理实现暂时不支持分页
         return emptyList()
     }
 

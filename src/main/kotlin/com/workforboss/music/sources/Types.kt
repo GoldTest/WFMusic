@@ -15,7 +15,7 @@ data class Track(
 
 interface SourceAdapter {
     val name: String
-    suspend fun search(q: String): List<Track>
+    suspend fun search(q: String, page: Int = 1): List<Track>
     suspend fun streamUrl(id: String): String
     suspend fun lyrics(id: String): String?
 }

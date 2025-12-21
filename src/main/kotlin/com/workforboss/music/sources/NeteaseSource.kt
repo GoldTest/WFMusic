@@ -22,15 +22,17 @@ class NeteaseSource : SourceAdapter {
         )
     }
 
-    override suspend fun search(q: String): List<Track> {
+    override suspend fun search(q: String, page: Int): List<Track> {
+        val limit = 30
+        val offset = (page - 1) * limit
         // 先尝试直连搜索接口 (不需要 Vercel 代理)
         val directResult = runCatching {
             val resp: NeteaseDirectSearchResp = client.get("https://music.163.com/api/search/get/web") {
                 url {
                     parameters.append("s", q)
                     parameters.append("type", "1")
-                    parameters.append("offset", "0")
-                    parameters.append("limit", "30")
+                    parameters.append("offset", offset.toString())
+                    parameters.append("limit", limit.toString())
                 }
             }.body()
             resp.result?.songs ?: emptyList()
@@ -48,13 +50,16 @@ class NeteaseSource : SourceAdapter {
 
             return directResult.map { s ->
                 val detail = details[s.id]
+                val rawCoverUrl = (detail?.al?.picUrl ?: detail?.album?.picUrl ?: s.album?.picUrl)?.let { url ->
+                    if (url.startsWith("http://")) url.replace("http://", "https://") else url
+                }
                 Track(
                     id = s.id.toString(),
                     title = s.name ?: "",
                     artist = s.artists?.joinToString("/") { it.name ?: "Unknown" } ?: "Unknown",
                     album = s.album?.name,
                     durationMs = s.duration,
-                    coverUrl = detail?.al?.picUrl ?: detail?.album?.picUrl ?: s.album?.picUrl,
+                    coverUrl = rawCoverUrl?.let { if (it.contains("?")) it else "$it?param=120y120" },
                     source = "netease"
                 )
             }
@@ -65,20 +70,27 @@ class NeteaseSource : SourceAdapter {
             if (b.contains("music.163.com")) continue
             val result = runCatching {
                 val data: NeteaseSearchResp = client.get("$b/search") {
-                    url { parameters.append("keywords", q); parameters.append("limit", "30") }
+                    url { 
+                        parameters.append("keywords", q)
+                        parameters.append("limit", limit.toString())
+                        parameters.append("offset", offset.toString())
+                    }
                 }.body()
                 data.result?.songs ?: emptyList()
             }.getOrNull() ?: emptyList()
             
             if (result.isNotEmpty()) {
                 return result.map { s ->
+                    val rawCoverUrl = s.al?.picUrl?.let { url ->
+                        if (url.startsWith("http://")) url.replace("http://", "https://") else url
+                    }
                     Track(
                         id = s.id.toString(),
                         title = s.name,
                         artist = s.ar.joinToString("/") { a -> a.name },
                         album = s.al?.name,
                         durationMs = s.dt,
-                        coverUrl = s.al?.picUrl,
+                        coverUrl = rawCoverUrl?.let { if (it.contains("?")) it else "$it?param=120y120" },
                         source = "netease"
                     )
                 }

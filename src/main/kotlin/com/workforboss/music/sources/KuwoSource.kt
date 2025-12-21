@@ -15,15 +15,17 @@ class KuwoSource : SourceAdapter {
     }
     override val name: String = "kuwo"
 
-    override suspend fun search(q: String): List<Track> {
+    override suspend fun search(q: String, page: Int): List<Track> {
+        val limit = 30
+        val offset = (page - 1) * limit
         val result = runCatching {
             // 酷我公开搜索接口
             val resp: String = client.get("http://search.kuwo.cn/r.s") {
                 url {
                     parameters.append("client", "kt")
                     parameters.append("all", q)
-                    parameters.append("pn", "0")
-                    parameters.append("rn", "30")
+                    parameters.append("pn", (page - 1).toString())
+                    parameters.append("rn", limit.toString())
                     parameters.append("uid", "794")
                     parameters.append("ver", "kwplayer_ar_9.2.2.1")
                     parameters.append("vipver", "1")
@@ -49,8 +51,8 @@ class KuwoSource : SourceAdapter {
                 title = s.SONGNAME ?: "",
                 artist = s.ARTIST ?: "Unknown",
                 album = s.ALBUM,
-                durationMs = s.DURATION?.let { parseDuration(it) },
-                coverUrl = null, // 酷我封面需要额外接口
+                durationMs = s.DURATION?.toLongOrNull()?.times(1000),
+                coverUrl = null, // 酷我搜索结果通常不带封面，需要 streamUrl 时获取
                 source = "kuwo"
             )
         }

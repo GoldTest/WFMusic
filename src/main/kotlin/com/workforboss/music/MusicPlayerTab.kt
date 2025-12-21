@@ -67,6 +67,10 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
     val sourceResults = remember { mutableStateMapOf<String, List<Track>>() }
     val sourceLoading = remember { mutableStateMapOf<String, Boolean>() }
     val sourceError = remember { mutableStateMapOf<String, String?>() }
+    val sourcePages = remember { mutableStateMapOf<String, Int>() }
+    val sourceLoadingMore = remember { mutableStateMapOf<String, Boolean>() }
+
+    val listState = rememberLazyListState()
 
     var searchLoading by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
@@ -180,13 +184,16 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                     sourceResults[it] = emptyList()
                     sourceLoading[it] = it != "all"
                     sourceError[it] = null
+                    sourcePages[it] = 1
+                    sourceLoadingMore[it] = false
                 }
                 try {
                     val jobs = sources.filter { it != "all" }.map { name ->
                         async {
                             runCatching {
-                                val res = chain.searchBySource(name, searchText.trim())
-                                sourceResults[name] = res
+                                val res = chain.searchBySource(name, searchText.trim(), 1)
+                                // 初始搜索也进行去重保护
+                                sourceResults[name] = res.distinctBy { it.id }
                                 sourceLoading[name] = false
                             }.onFailure {
                                 sourceError[name] = it.message
@@ -198,12 +205,66 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                     val allResults = sources.filter { it != "all" }.flatMap { sourceResults[it] ?: emptyList() }
                     sourceResults["all"] = allResults
                     if (allResults.isEmpty()) msg = "未找到相关结果"
+                    
+                    // 搜索完成后回到顶部 (必须在主线程执行 UI 操作)
+                    scope.launch(Dispatchers.Main) {
+                        listState.scrollToItem(0)
+                    }
                 } catch (e: Exception) {
                     msg = "搜索失败: ${e.message}"
                 }
                 searchLoading = false
             }
         }
+    }
+
+    val loadMore = { source: String ->
+        if (source != "all" && source != "local" && sourceLoadingMore[source] != true && !searchText.isBlank()) {
+            scope.launch(Dispatchers.IO) {
+                sourceLoadingMore[source] = true
+                val nextPage = (sourcePages[source] ?: 1) + 1
+                runCatching {
+                    val res = chain.searchBySource(source, searchText.trim(), nextPage)
+                    if (res.isNotEmpty()) {
+                        val current = sourceResults[source] ?: emptyList()
+                        // 去重处理，防止 LazyColumn Key 重复导致崩溃
+                        val existingIds = current.map { it.id }.toSet()
+                        val newItems = res.filter { it.id !in existingIds }
+                        
+                        if (newItems.isNotEmpty()) {
+                            sourceResults[source] = current + newItems
+                            sourcePages[source] = nextPage
+                        } else {
+                            // 如果返回的结果全部是重复的，可能已经到底了
+                            msg = "没有更多新结果了"
+                        }
+                    } else {
+                        msg = "没有更多结果了"
+                    }
+                }.onFailure {
+                    msg = "加载更多失败: ${it.message}"
+                }
+                sourceLoadingMore[source] = false
+            }
+        }
+    }
+
+    // 监听滑动到底部
+    LaunchedEffect(listState, selectedTab) {
+        // 切换标签时回到顶部
+        listState.scrollToItem(0)
+        
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo }
+            .collect { visibleItems ->
+                val lastVisibleItem = visibleItems.lastOrNull() ?: return@collect
+                val totalItemsCount = listState.layoutInfo.totalItemsCount
+                
+                // 距离底部还有 2 个元素时开始加载
+                if (lastVisibleItem.index >= totalItemsCount - 2 && totalItemsCount > 0) {
+                    val currentSource = sources[selectedTab]
+                    loadMore(currentSource)
+                }
+            }
     }
 
     Scaffold(
@@ -381,15 +442,16 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                             Text(currentPlayerError, color = Color.Red, modifier = Modifier.padding(bottom = 8.dp))
                         }
                         
-                        val currentResults = sourceResults[sources[selectedTab]] ?: emptyList()
-                        val currentError = sourceError[sources[selectedTab]]
+                        val currentSource = sources[selectedTab]
+                        val currentResults = sourceResults[currentSource] ?: emptyList()
+                        val currentError = sourceError[currentSource]
                         
                         if (currentError != null) {
                             Text("该平台搜索出错: $currentError", color = Color.Red, style = MaterialTheme.typography.caption)
                         }
 
-                        LazyColumn(Modifier.fillMaxSize()) {
-                            if (sources[selectedTab] == "local") {
+                        LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                            if (currentSource == "local") {
                                 items(library.localTracks, key = { it.id }) { lt ->
                                     LocalTrackItem(
                                         lt = lt,
@@ -429,6 +491,15 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                             playingIndex = -1
                                         }
                                     )
+                                }
+                                
+                                // 加载更多指示器
+                                if (sourceLoadingMore[currentSource] == true) {
+                                    item {
+                                        Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -725,6 +796,18 @@ private fun SearchResultItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 封面图显示
+            val sourceColor = remember(t.source) {
+                when(t.source) {
+                    "netease" -> Color(0xFFE53935)
+                    "qq" -> Color(0xFF43A047)
+                    "kugou" -> Color(0xFF1E88E5)
+                    "kuwo" -> Color(0xFFFDD835)
+                    "migu" -> Color(0xFFF06292)
+                    "itunes" -> Color(0xFF9C27B0)
+                    else -> Color.Gray
+                }
+            }
+
             Surface(
                 modifier = Modifier.size(48.dp),
                 shape = RoundedCornerShape(8.dp),
@@ -738,7 +821,7 @@ private fun SearchResultItem(
                         contentDescription = "Cover",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop,
-                        onLoading = { CircularProgressIndicator(modifier = Modifier.padding(12.dp), strokeWidth = 2.dp) },
+                        onLoading = { Box(Modifier.fillMaxSize().background(Color.Gray.copy(alpha = 0.1f))) },
                         onFailure = { Icon(Icons.Default.PlayArrow, null, modifier = Modifier.padding(12.dp), tint = Color.Gray.copy(alpha = 0.5f)) }
                     )
                 } else {
@@ -752,15 +835,7 @@ private fun SearchResultItem(
                 Text(t.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.body1.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
-                        color = when(t.source) {
-                            "netease" -> Color(0xFFE53935)
-                            "qq" -> Color(0xFF43A047)
-                            "kugou" -> Color(0xFF1E88E5)
-                            "kuwo" -> Color(0xFFFDD835) // 酷我黄色
-                            "migu" -> Color(0xFFF06292) // 咪咕粉色
-                            "itunes" -> Color(0xFF9C27B0)
-                            else -> Color.Gray
-                        },
+                        color = sourceColor,
                         shape = RoundedCornerShape(4.dp)
                     ) {
                         Text(

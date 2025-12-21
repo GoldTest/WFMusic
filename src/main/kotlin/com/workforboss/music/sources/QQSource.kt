@@ -26,35 +26,74 @@ class QQSource : SourceAdapter {
         )
     }
 
-    override suspend fun search(q: String): List<Track> {
-        // 1. 尝试直连获取基本信息 (不含播放链接)
+    override suspend fun search(q: String, page: Int): List<Track> {
+        val limit = 30
+        val offset = (page - 1) * limit
+        // 尝试直连官方搜索接口 (部分地区可用)
         val directResult = runCatching {
             val resp: String = client.get("https://c.y.qq.com/soso/fcgi-bin/client_search_cp") {
                 url {
-                    parameters.append("p", "1")
-                    parameters.append("n", "30")
                     parameters.append("w", q)
+                    parameters.append("n", limit.toString())
+                    parameters.append("p", page.toString())
                     parameters.append("format", "json")
+                    parameters.append("cr", "1")
+                    parameters.append("g_tk", "5381")
                 }
-                header("Referer", "https://y.qq.com/")
-                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
             }.body()
-            
-            val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
-            json.jsonObject["data"]?.jsonObject?.get("song")?.jsonObject?.get("list")?.jsonArray ?: emptyJsonArray
-        }.getOrNull() ?: emptyJsonArray
+            val data = Json { ignoreUnknownKeys = true }.decodeFromString<QQDirectSearchResp>(resp)
+            data.data?.song?.list ?: emptyList()
+        }.getOrNull()
 
-        if (directResult.isNotEmpty()) {
-            return directResult.map { it.jsonObject }.map { s ->
+        if (directResult != null && directResult.isNotEmpty()) {
+            return directResult.map { s ->
                 Track(
-                    id = s["songmid"]?.jsonPrimitive?.content ?: "",
-                    title = s["songname"]?.jsonPrimitive?.content ?: "",
-                    artist = s["singer"]?.jsonArray?.joinToString("/") { it.jsonObject["name"]?.jsonPrimitive?.content ?: "Unknown" } ?: "Unknown",
-                    album = s["albumname"]?.jsonPrimitive?.content,
-                    durationMs = s["interval"]?.jsonPrimitive?.longOrNull?.let { it * 1000L },
-                    coverUrl = s["albummid"]?.jsonPrimitive?.content?.let { "https://y.gtimg.cn/music/photo_new/T002R300x300M000${it}.jpg" },
+                    id = s.songmid ?: "",
+                    title = s.songname ?: "",
+                    artist = s.singer?.joinToString("/") { it.name ?: "Unknown" } ?: "Unknown",
+                    album = s.albumname,
+                    durationMs = s.interval?.toLong()?.times(1000),
+                    coverUrl = s.albummid?.let { "https://y.gtimg.cn/music/photo_new/T002R300x300M000${it}.jpg" },
                     source = "qq"
                 )
+            }
+        }
+
+        // 回退到代理
+        for (b in bases) {
+            val result = runCatching {
+                val url = if (b.contains("leafone") || b.contains("yujn")) {
+                    "$b?name=$q"
+                } else {
+                    "$b?source=qq&name=$q"
+                }
+                val resp: String = client.get(url).body()
+                val json = Json { ignoreUnknownKeys = true }.parseToJsonElement(resp)
+                
+                // 适配不同代理返回格式
+                val list = when {
+                    json is JsonArray -> json
+                    json is JsonObject && json.containsKey("data") -> {
+                        val data = json["data"]
+                        if (data is JsonArray) data else data?.jsonObject?.get("list")?.jsonArray
+                    }
+                    else -> null
+                }
+                list?.map { it.jsonObject }
+            }.getOrNull() ?: emptyList()
+
+            if (result.isNotEmpty()) {
+                return result.map { s ->
+                    Track(
+                        id = s["id"]?.jsonPrimitive?.content ?: s["songid"]?.jsonPrimitive?.content ?: s["mid"]?.jsonPrimitive?.content ?: "",
+                        title = s["title"]?.jsonPrimitive?.content ?: s["name"]?.jsonPrimitive?.content ?: s["songname"]?.jsonPrimitive?.content ?: "",
+                        artist = s["artist"]?.jsonPrimitive?.content ?: s["singer"]?.jsonPrimitive?.content ?: "Unknown",
+                        album = s["album"]?.jsonPrimitive?.content ?: s["albumname"]?.jsonPrimitive?.content,
+                        durationMs = s["duration"]?.jsonPrimitive?.content?.toLongOrNull()?.times(1000) ?: s["interval"]?.jsonPrimitive?.content?.toLongOrNull()?.times(1000),
+                        coverUrl = s["pic"]?.jsonPrimitive?.content ?: s["cover"]?.jsonPrimitive?.content ?: s["img"]?.jsonPrimitive?.content,
+                        source = "qq"
+                    )
+                }
             }
         }
         return emptyList()

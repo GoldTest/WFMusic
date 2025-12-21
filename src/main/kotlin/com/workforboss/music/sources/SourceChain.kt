@@ -15,19 +15,19 @@ class SourceChain {
     )
     private val order = listOf("netease", "qq", "kugou", "kuwo", "migu", "itunes")
 
-    suspend fun search(q: String): List<Track> = coroutineScope {
+    suspend fun search(q: String, page: Int = 1): List<Track> = coroutineScope {
         val jobs = order.map { name ->
             async {
-                searchBySource(name, q)
+                searchBySource(name, q, page)
             }
         }
         jobs.awaitAll().flatten()
     }
 
-    suspend fun searchBySource(source: String, q: String): List<Track> {
+    suspend fun searchBySource(source: String, q: String, page: Int = 1): List<Track> {
         val ad = adapters[source] ?: return emptyList()
         return runCatching {
-            ad.search(q).map { it.copy(source = source) }
+            ad.search(q, page).map { it.copy(source = source) }
         }.getOrDefault(emptyList())
     }
 
