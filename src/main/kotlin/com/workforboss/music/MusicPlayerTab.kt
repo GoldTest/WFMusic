@@ -1219,15 +1219,33 @@ private fun PlayerControls(
             // 音量控制
             var vol by remember { mutableStateOf(0.8f) }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.VolumeUp, null, modifier = Modifier.size(20.dp), tint = Color.Gray)
+                Icon(
+                    if (vol > 1.0f) Icons.Default.VolumeUp else if (vol > 0f) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
+                    null, 
+                    modifier = Modifier.size(20.dp), 
+                    tint = if (vol > 1.0f) MaterialTheme.colors.secondary else Color.Gray
+                )
                 Slider(
                     value = vol,
                     onValueChange = {
                         vol = it
                         onVolumePercent((it * 100).toInt())
                     },
-                    modifier = Modifier.width(100.dp) // 恢复默认宽度
+                    valueRange = 0f..1.5f,
+                    modifier = Modifier.width(120.dp), // 稍微加宽一点
+                    colors = SliderDefaults.colors(
+                        thumbColor = if (vol > 1.0f) MaterialTheme.colors.secondary else MaterialTheme.colors.primary,
+                        activeTrackColor = if (vol > 1.0f) MaterialTheme.colors.secondary else MaterialTheme.colors.primary
+                    )
                 )
+                if (vol > 1.0f) {
+                    Text(
+                        "${(vol * 100).toInt()}%",
+                        style = MaterialTheme.typography.overline,
+                        color = MaterialTheme.colors.secondary,
+                        modifier = Modifier.width(30.dp)
+                    )
+                }
             }
         }
     }

@@ -54,12 +54,28 @@ class AudioPlayer {
     }
 
     fun setVolume(p: Int) {
-        currentVolume = (p / 100.0).coerceIn(0.0, 1.0)
+        currentVolume = (p / 100.0).coerceIn(0.0, 1.5)
         val player = mediaPlayer ?: return
         Platform.runLater {
             if (player.status != MediaPlayer.Status.DISPOSED) {
-                player.volume = currentVolume
+                applyVolumeAndBoost(player, currentVolume)
             }
+        }
+    }
+
+    private fun applyVolumeAndBoost(player: MediaPlayer, vol: Double) {
+        if (vol <= 1.0) {
+            player.volume = vol
+            val eq = player.audioEqualizer
+            if (eq.isEnabled) eq.isEnabled = false
+        } else {
+            player.volume = 1.0
+            val eq = player.audioEqualizer
+            if (!eq.isEnabled) eq.isEnabled = true
+            // gain = 20 * log10(vol)
+            // For 1.5, gain is ~3.52 dB
+            val gainDb = 20.0 * Math.log10(vol)
+            eq.bands.forEach { it.gain = gainDb }
         }
     }
 
@@ -165,7 +181,7 @@ class AudioPlayer {
                 
                 val player = MediaPlayer(media)
                 
-                player.volume = currentVolume
+                applyVolumeAndBoost(player, currentVolume)
                 player.onReady = Runnable {
                     if (mediaPlayer === player) {
                         _durationSec.value = media.duration.toSeconds()
@@ -205,9 +221,9 @@ class AudioPlayer {
                 if (mediaPlayer === player && player.status != MediaPlayer.Status.DISPOSED) {
                     // 如果需要淡入，先将音量设为 0
                     if (fadeIn) {
-                        player.volume = 0.0
+                        applyVolumeAndBoost(player, 0.0)
                     } else {
-                        player.volume = currentVolume
+                        applyVolumeAndBoost(player, currentVolume)
                     }
                     
                     player.play()
@@ -256,7 +272,15 @@ class AudioPlayer {
 
     private suspend fun smoothFadeVolume(target: Double, durationMs: Long = 300) {
         val player = mediaPlayer ?: return
-        val startVolume = player.volume
+        // 这里的 startVolume 尽量获取当前的逻辑音量
+        val startVolume = if (player.audioEqualizer.isEnabled) {
+            // 如果开启了均衡器，说明音量 > 1.0
+            // 这里简单通过 currentVolume 判断，或者从 gainDb 还原
+            currentVolume 
+        } else {
+            player.volume
+        }
+        
         val steps = 10
         val stepDelta = (target - startVolume) / steps
         val stepDelay = durationMs / steps
@@ -265,7 +289,7 @@ class AudioPlayer {
             val nextVol = startVolume + stepDelta * i
             Platform.runLater {
                 if (player.status != MediaPlayer.Status.DISPOSED) {
-                    player.volume = nextVol.coerceIn(0.0, 1.0)
+                    applyVolumeAndBoost(player, nextVol.coerceIn(0.0, 1.5))
                 }
             }
             delay(stepDelay)
