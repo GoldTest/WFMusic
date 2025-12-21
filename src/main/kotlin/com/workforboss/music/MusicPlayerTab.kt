@@ -261,8 +261,8 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                                                      runCatching {
                                                          val id = "local_${System.currentTimeMillis()}_${file.name.hashCode()}.${file.extension}"
                                                          val targetFile = Storage.getMusicFile("local", id)
-                                                         // 移动文件
-                                                         java.nio.file.Files.move(file.toPath(), targetFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                                                         // 复制文件而不是移动，保留原始文件
+                                                         java.nio.file.Files.copy(file.toPath(), targetFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
                                                          
                                                          val track = LocalTrack(
                                                              id = id,

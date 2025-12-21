@@ -23,7 +23,10 @@ object LocalLibrary {
 
     fun deleteTrack(trackId: String, state: LibraryState): LibraryState {
         val track = state.localTracks.find { it.id == trackId } ?: return state
-        Storage.deleteLocalTrackFile(track.path)
+        // 仅在文件位于应用内部存储目录时才尝试删除
+        if (track.path.contains("WFMusic")) {
+            Storage.deleteLocalTrackFile(track.path)
+        }
         return state.copy(localTracks = state.localTracks.filterNot { it.id == trackId })
     }
 
