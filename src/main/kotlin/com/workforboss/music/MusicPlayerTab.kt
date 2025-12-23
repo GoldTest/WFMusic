@@ -158,10 +158,18 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
         }
     }
 
-    DisposableEffect(Unit) {
-        scope.launch {
+    // 页面启动时自动聚焦搜索框
+    LaunchedEffect(Unit) {
+        // 稍微延迟一点点，确保 Compose 组件已经挂载到 AWT 窗口并准备好接收焦点
+        delay(100)
+        try {
             focusRequester.requestFocus()
+        } catch (e: Exception) {
+            // 忽略聚焦失败，不影响主要功能
         }
+    }
+
+    DisposableEffect(Unit) {
         onDispose {
             player.dispose()
             Storage.saveLibrary(library)

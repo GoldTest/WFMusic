@@ -1,5 +1,6 @@
 package com.workforboss.music
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
@@ -8,11 +9,19 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.ui.Alignment
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.awt.SwingPanel
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.rememberWindowState
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.awt.SwingPanel
+import kotlinx.coroutines.*
+import java.io.File
+import java.awt.Toolkit
+import androidx.compose.ui.window.WindowPlacement
+import androidx.compose.ui.input.key.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import javafx.application.Platform
 import javafx.embed.swing.JFXPanel
 import javafx.scene.Scene
@@ -20,18 +29,8 @@ import javafx.scene.layout.StackPane
 import javafx.scene.media.Media
 import javafx.scene.media.MediaPlayer
 import javafx.scene.media.MediaView
-import kotlinx.coroutines.*
-import java.io.File
-import javafx.scene.paint.Color
-import javafx.scene.control.Label
-import javax.swing.SwingUtilities
-import java.awt.Toolkit
-
-import androidx.compose.ui.window.WindowPlacement
-import androidx.compose.ui.input.key.*
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.input.pointer.pointerInput
+import javafx.scene.paint.Color as JFXColor
+import kotlin.math.abs
 
 class BilibiliVideoPlayer(
     private val audioPlayer: AudioPlayer
@@ -45,12 +44,7 @@ class BilibiliVideoPlayer(
     var isFullscreen by mutableStateOf(false)
         private set
 
-    private var videoPlayer: MediaPlayer? = null
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private var syncJob: Job? = null
-    private var fallbackJob: Job? = null
-    private var jfxPanel: JFXPanel? = null
-    private var rootPane: StackPane? = null
 
     init {
         scope.launch {
@@ -60,9 +54,7 @@ class BilibiliVideoPlayer(
                         closeVideo()
                     }
                 } else {
-                    // 如果视频窗口正开着，且切换到了另一个 B 站视频，自动更新视频内容
                     if (isVisible && currentTrack?.id != track.id) {
-                        println("BilibiliVideoPlayer: Auto-switching video to ${track.title}")
                         currentTrack = track
                     }
                 }
@@ -87,12 +79,10 @@ class BilibiliVideoPlayer(
         
         val track = currentTrack!!
         
-        // 获取屏幕尺寸，计算 80% 屏幕高度
         val screenSize = Toolkit.getDefaultToolkit().screenSize
         val screenHeight = screenSize.height
         val targetHeightPx = (screenHeight * 0.8).toInt()
         
-        // 根据视频比例计算宽度，默认 16:9
         val videoWidth = track.videoWidth ?: 1920
         val videoHeight = track.videoHeight ?: 1080
         val ratio = videoWidth.toFloat() / videoHeight.toFloat()
@@ -108,61 +98,178 @@ class BilibiliVideoPlayer(
             placement = if (isFullscreen) WindowPlacement.Fullscreen else WindowPlacement.Floating
         )
         
-        // 当视频切换时，自动调整窗口大小适配新视频比例
         LaunchedEffect(track.id) {
             if (!isFullscreen) {
                 windowState.size = DpSize(widthDp, heightDp)
             }
         }
 
-        Window(
-            onCloseRequest = { closeVideo() },
-            state = windowState,
-            title = "Bilibili Video - ${track.title} [${track.videoQuality ?: if (track.videoHeight != null) "${track.videoHeight}P" else "未知"}]",
-            alwaysOnTop = isFullscreen,
-            undecorated = isFullscreen
-        ) {
-            Box(
-                Modifier.fillMaxSize()
+            Window(
+                onCloseRequest = { closeVideo() },
+                state = windowState,
+                title = "Bilibili Video - ${track.title}",
+                alwaysOnTop = isFullscreen,
+                undecorated = isFullscreen
             ) {
-                key(track.id) {
-                    SwingPanel(
-                        factory = {
-                            JFXPanel().also { panel ->
-                                jfxPanel = panel
-                                // 设置一个默认的首选大小，防止在某些布局下塌陷为 0
-                                panel.preferredSize = java.awt.Dimension(1280, 720)
-                                
+                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black)) {
+                    // 视频路径选择逻辑
+                    val videoUrl = remember(track.id) {
+                        val videoFile = Storage.getVideoFile(track.source, track.id)
+                        val partFile = File(videoFile.absolutePath + ".part")
+                        
+                        when {
+                            videoFile.exists() -> videoFile.toURI().toString()
+                            partFile.exists() && partFile.length() > 1024 * 1024 -> partFile.toURI().toString()
+                            else -> track.videoUrl ?: ""
+                        }
+                    }
+
+                if (videoUrl.isNotBlank()) {
+                    key(track.id) {
+
+                        var isTransitioning by remember { mutableStateOf(true) }
+                        val jfxPanel = remember { JFXPanel() }
+                        var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+                        
+                        // 切换视频时，先给一点缓冲时间
+                        LaunchedEffect(track.id) {
+                            isTransitioning = true
+                            delay(400) // 停顿 400ms，确保旧资源释放且界面有明确切换感
+                            isTransitioning = false
+                        }
+
+                        // Initialize JavaFX Platform
+                        LaunchedEffect(Unit) {
+                            try {
+                                Platform.startup {}
+                            } catch (e: Exception) {
+                                // Already started
+                            }
+                        }
+
+                        // Handle playback and sync
+                        DisposableEffect(mediaPlayer, audioPlayer.isPlaying.value) {
+                            val player = mediaPlayer ?: return@DisposableEffect onDispose {}
+                            
+                            val statusListener = javafx.beans.value.ChangeListener<MediaPlayer.Status> { _, _, newStatus ->
+                                if (newStatus == MediaPlayer.Status.READY || newStatus == MediaPlayer.Status.PLAYING || newStatus == MediaPlayer.Status.PAUSED) {
+                                    Platform.runLater {
+                                        if (audioPlayer.isPlaying.value) player.play() else player.pause()
+                                    }
+                                }
+                            }
+                            
+                            Platform.runLater {
+                                player.statusProperty().addListener(statusListener)
+                                if (player.status != MediaPlayer.Status.UNKNOWN) {
+                                    if (audioPlayer.isPlaying.value) player.play() else player.pause()
+                                }
+                            }
+                            
+                            onDispose {
                                 Platform.runLater {
-                                        try {
-                                            val root = StackPane()
-                                            root.style = "-fx-background-color: black;"
-                                            rootPane = root
-                                            val scene = Scene(root)
-                                            scene.fill = Color.BLACK
-                                            panel.scene = scene
-                                            
-                                            // 开始播放逻辑：优先使用本地缓存，因为 JavaFX 直接播放 B 站在线流速度较慢且不稳定
-                                            val videoFile = Storage.getVideoFile(track.source, track.id)
-                                            val partFile = File(videoFile.absolutePath + ".part")
-                                            
-                                            if (videoFile.exists()) {
-                                                startPlaying(videoFile.toURI().toString(), root)
-                                            } else if (partFile.exists() && partFile.length() > 1024 * 1024 * 1) { 
-                                                startPlaying(partFile.toURI().toString(), root)
-                                            } else {
-                                                showStatus("正在请求视频流...", root)
-                                                triggerFallback(root)
+                                    player.statusProperty().removeListener(statusListener)
+                                }
+                            }
+                        }
+
+                        LaunchedEffect(mediaPlayer) {
+                            val player = mediaPlayer ?: return@LaunchedEffect
+                            while (true) {
+                                if (player.status != MediaPlayer.Status.UNKNOWN && player.status != MediaPlayer.Status.STALLED) {
+                                    val audioPos = audioPlayer.positionSec.value
+                                    Platform.runLater {
+                                        if (player.status == MediaPlayer.Status.PLAYING || player.status == MediaPlayer.Status.PAUSED) {
+                                            val videoPos = player.currentTime.toSeconds()
+                                            if (abs(audioPos - videoPos) > 1.2) {
+                                                player.seek(javafx.util.Duration.seconds(audioPos))
                                             }
-                                        } catch (e: Exception) {
-                                            println("BilibiliVideoPlayer: Error initializing JavaFX Scene: ${e.message}")
-                                            e.printStackTrace()
                                         }
                                     }
+                                }
+                                delay(1000)
                             }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                        }
+
+                        // Cleanup
+                        DisposableEffect(Unit) {
+                            onDispose {
+                                Platform.runLater {
+                                    mediaPlayer?.stop()
+                                    mediaPlayer?.dispose()
+                                    mediaPlayer = null
+                                }
+                            }
+                        }
+
+                        Box(Modifier.fillMaxSize()) {
+                            var isPlayerReady by remember { mutableStateOf(false) }
+
+                            SwingPanel(
+                                factory = {
+                                    jfxPanel.apply {
+                                        Platform.runLater {
+                                            try {
+                                                val media = Media(videoUrl)
+                                                val player = MediaPlayer(media).apply {
+                                                    isMute = true
+                                                    cycleCount = MediaPlayer.INDEFINITE
+                                                }
+                                                
+                                                player.onReady = Runnable {
+                                                    Platform.runLater {
+                                                        try {
+                                                            val startPos = audioPlayer.positionSec.value
+                                                            if (startPos > 0.1) {
+                                                                player.seek(javafx.util.Duration.seconds(startPos))
+                                                            }
+                                                            if (audioPlayer.isPlaying.value) {
+                                                                player.play()
+                                                            }
+                                                            isPlayerReady = true
+                                                        } catch (e: Exception) {
+                                                            println("VideoPlayer onReady Error: ${e.message}")
+                                                        }
+                                                    }
+                                                }
+
+                                                player.onError = Runnable {
+                                                    println("VideoPlayer Media Error: ${player.error?.message}")
+                                                }
+                                                
+                                                val mediaView = MediaView(player)
+                                                val root = StackPane(mediaView)
+                                                root.style = "-fx-background-color: black;"
+                                                mediaView.preserveRatioProperty().set(true)
+                                                mediaView.fitWidthProperty().bind(root.widthProperty())
+                                                mediaView.fitHeightProperty().bind(root.heightProperty())
+                                                
+                                                val scene = Scene(root, JFXColor.BLACK)
+                                                jfxPanel.scene = scene
+                                                mediaPlayer = player
+                                            } catch (e: Exception) {
+                                                println("VideoPlayer Factory Error: ${e.message}")
+                                            }
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            
+                            // 过渡遮罩，当正在切换或播放器还没准备好时显示
+                            if (isTransitioning || !isPlayerReady) {
+                                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black)) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.align(Alignment.Center).size(32.dp),
+                                        color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.5f),
+                                        strokeWidth = 2.dp
+                                    )
+                                }
+                            }
+                                                }
+                        }
+                } else {
+                    Text("正在准备视频资源...", color = androidx.compose.ui.graphics.Color.White, modifier = Modifier.align(Alignment.Center))
                 }
 
                 // 右下角控制区
@@ -170,7 +277,6 @@ class BilibiliVideoPlayer(
                     modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 分辨率角标
                     val quality = track.videoQuality ?: if (track.videoHeight != null) "${track.videoHeight}P" else "未知"
                     Surface(
                         color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f),
@@ -186,7 +292,6 @@ class BilibiliVideoPlayer(
                     
                     Spacer(Modifier.width(8.dp))
                     
-                    // 全屏按钮
                     Surface(
                         color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f),
                         shape = RoundedCornerShape(4.dp)
@@ -208,205 +313,8 @@ class BilibiliVideoPlayer(
         }
     }
 
-    private fun showStatus(text: String, root: StackPane) {
-        Platform.runLater {
-            root.children.clear()
-            val label = Label(text)
-            label.setTextFill(Color.WHITE)
-            label.setStyle("-fx-font-size: 16px;")
-            root.children.add(label)
-        }
-    }
-
-    private fun triggerFallback(root: StackPane) {
-        val track = currentTrack ?: return
-        val videoFile = Storage.getVideoFile(track.source, track.id)
-        
-        fallbackJob?.cancel()
-        fallbackJob = scope.launch {
-            showStatus("正在准备视频资源...", root)
-            
-            var attempts = 0
-            val partFile = File(videoFile.absolutePath + ".part")
-            
-            while (!videoFile.exists() && attempts < 30 && isActive) {
-                if (attempts % 2 == 0) {
-                    val status = if (partFile.exists()) {
-                        val sizeMB = partFile.length() / (1024 * 1024)
-                        "视频缓冲中 ($sizeMB MB)..."
-                    } else {
-                        "等待视频流响应..."
-                    }
-                    showStatus(status, root)
-                }
-                delay(1000)
-                attempts++
-                
-                // 如果缓冲够了，尝试播放
-                if (partFile.exists() && partFile.length() > 1024 * 1024 * 1.5) {
-                    break
-                }
-            }
-            
-            if (isActive) {
-                if (videoFile.exists()) {
-                    startPlaying(videoFile.toURI().toString(), root)
-                } else if (partFile.exists() && partFile.length() > 1024 * 1024 * 1) {
-                    startPlaying(partFile.toURI().toString(), root)
-                } else {
-                    showStatus("视频加载超时，请检查网络。", root)
-                }
-            }
-        }
-    }
-
-    private fun startPlaying(url: String, root: StackPane) {
-        syncJob?.cancel()
-        syncJob = null
-        fallbackJob?.cancel()
-        fallbackJob = null
-
-        val action = Runnable {
-            try {
-                val oldPlayer = videoPlayer
-                if (oldPlayer != null) {
-                    oldPlayer.onReady = null
-                    oldPlayer.onError = null
-                    oldPlayer.onEndOfMedia = null
-                    
-                    if (oldPlayer.status != MediaPlayer.Status.DISPOSED) {
-                        try {
-                            if (oldPlayer.status == MediaPlayer.Status.PLAYING) {
-                                oldPlayer.pause()
-                            }
-                        } catch (e: Exception) {}
-                        oldPlayer.dispose()
-                    }
-                    videoPlayer = null
-                }
-
-                val media = Media(url)
-                val player = MediaPlayer(media)
-                videoPlayer = player
-                player.isMute = true // 必须静音，防止干扰音频播放器
-                
-                val mediaView = MediaView(player)
-                mediaView.isPreserveRatio = true
-                mediaView.fitWidthProperty().bind(root.widthProperty())
-                mediaView.fitHeightProperty().bind(root.heightProperty())
-                
-                root.children.clear()
-                root.children.add(mediaView)
-                
-                player.onReady = Runnable {
-                    if (videoPlayer === player && player.status != MediaPlayer.Status.DISPOSED) {
-                        player.play()
-                        startSync()
-                    }
-                }
-
-                player.onError = Runnable errorLabel@{
-                    if (videoPlayer !== player || player.status == MediaPlayer.Status.DISPOSED) return@errorLabel
-                    
-                    val err = player.error?.message ?: "Unknown error"
-                    println("BilibiliVideoPlayer: Video player error: $err")
-                    
-                    if (!url.startsWith("file:")) {
-                        triggerFallback(root)
-                    }
-                }
-            } catch (e: Exception) {
-                println("BilibiliVideoPlayer: Failed to start playing: ${e.message}")
-            }
-        }
-
-        if (Platform.isFxApplicationThread()) {
-            action.run()
-        } else {
-            Platform.runLater(action)
-        }
-    }
-
-    private fun startSync() {
-        syncJob?.cancel()
-        val currentPlayer = videoPlayer ?: return
-        
-        syncJob = scope.launch {
-            launch {
-                audioPlayer.isPlaying.collect { playing ->
-                    Platform.runLater {
-                        try {
-                            if (videoPlayer === currentPlayer && currentPlayer.status != MediaPlayer.Status.DISPOSED) {
-                                if (playing) currentPlayer.play() else currentPlayer.pause()
-                            }
-                        } catch (e: Exception) {}
-                    }
-                }
-            }
-            
-            while (isActive) {
-                delay(1000)
-                val audioPos = audioPlayer.positionSec.value
-                
-                Platform.runLater {
-                    try {
-                        if (videoPlayer === currentPlayer && currentPlayer.status != MediaPlayer.Status.DISPOSED) {
-                            val status = currentPlayer.status
-                            if (status == MediaPlayer.Status.PLAYING || status == MediaPlayer.Status.PAUSED || status == MediaPlayer.Status.READY) {
-                                val videoPos = currentPlayer.currentTime.toSeconds()
-                                if (Math.abs(audioPos - videoPos) > 1.5) { 
-                                    currentPlayer.seek(javafx.util.Duration.seconds(audioPos))
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {}
-                }
-            }
-        }
-    }
-
     fun closeVideo() {
-        if (!isVisible && videoPlayer == null) return
-        
-        println("BilibiliVideoPlayer: Closing video window and cleaning up...")
-        
         isVisible = false
         currentTrack = null
-        
-        syncJob?.cancel()
-        syncJob = null
-        fallbackJob?.cancel()
-        fallbackJob = null
-        
-        val playerToDispose = videoPlayer
-        videoPlayer = null
-        
-        val action = Runnable {
-            try {
-                if (playerToDispose != null) {
-                    playerToDispose.onReady = null
-                    playerToDispose.onError = null
-                    playerToDispose.onEndOfMedia = null
-                    
-                    if (playerToDispose.status != MediaPlayer.Status.DISPOSED) {
-                        try {
-                            playerToDispose.stop() 
-                        } catch (e: Exception) {}
-                        playerToDispose.dispose()
-                    }
-                    println("BilibiliVideoPlayer: Video player disposed")
-                }
-                
-                rootPane?.children?.clear()
-            } catch (e: Exception) {
-                println("BilibiliVideoPlayer: Error during close cleanup: ${e.message}")
-            }
-        }
-
-        if (Platform.isFxApplicationThread()) {
-            action.run()
-        } else {
-            Platform.runLater(action)
-        }
     }
 }
