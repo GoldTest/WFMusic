@@ -47,7 +47,7 @@ object Storage {
     }
 
 
-    fun downloadMusic(url: String, target: File, onProgress: ((Float) -> Unit)? = null) {
+    fun downloadMusic(url: String, target: File, headers: Map<String, String>? = null, onProgress: ((Float) -> Unit)? = null) {
         if (target.exists()) return
         val parent = target.parentFile
         if (parent != null && !parent.exists()) parent.mkdirs()
@@ -56,16 +56,30 @@ object Storage {
         val tmp = File(target.absolutePath + ".part")
         try {
             val conn = URI(url).toURL().openConnection()
-            // 使用更像真实浏览器的 User-Agent
+            // 默认 User-Agent
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            if (url.contains("qqmusic") || url.contains("qq.com")) {
-                conn.setRequestProperty("Referer", "https://y.qq.com/")
+            
+            // 应用传入的自定义 Header
+            headers?.forEach { (k, v) ->
+                conn.setRequestProperty(k, v)
+            }
+
+            // 补充缺省的 B 站 Header
+            if (url.contains("bilibili.com") || url.contains("bilivideo.com")) {
+                if (conn.getRequestProperty("Referer") == null) {
+                    conn.setRequestProperty("Referer", "https://www.bilibili.com/")
+                }
+                if (conn.getRequestProperty("Origin") == null) {
+                    conn.setRequestProperty("Origin", "https://www.bilibili.com")
+                }
+            } else if (url.contains("qqmusic") || url.contains("qq.com")) {
+                if (conn.getRequestProperty("Referer") == null) {
+                    conn.setRequestProperty("Referer", "https://y.qq.com/")
+                }
             } else if (url.contains("migu.cn")) {
-                conn.setRequestProperty("Referer", "https://m.music.migu.cn/")
-            } else if (url.contains("bilibili.com") || url.contains("bilivideo.com")) {
-                conn.setRequestProperty("Referer", "https://www.bilibili.com/")
-                // B 站视频有时需要特定的 Origin
-                conn.setRequestProperty("Origin", "https://www.bilibili.com")
+                if (conn.getRequestProperty("Referer") == null) {
+                    conn.setRequestProperty("Referer", "https://m.music.migu.cn/")
+                }
             }
             
             val totalSize = conn.contentLengthLong

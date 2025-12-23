@@ -1065,12 +1065,12 @@ private fun SearchResultItem(
                                     val stream = chain.streamUrlFor(t.source, t.id)
                                     val audioFile = Storage.getMusicFile(t.source, t.id)
                                     if (!audioFile.exists()) {
-                                        Storage.downloadMusic(stream.url, audioFile)
+                                        Storage.downloadMusic(stream.url, audioFile, headers = stream.headers)
                                     }
                                     if (t.source == "bilibili" && stream.videoUrl != null) {
                                         val videoFile = Storage.getVideoFile(t.source, t.id)
                                         if (!videoFile.exists()) {
-                                            Storage.downloadMusic(stream.videoUrl, videoFile)
+                                            Storage.downloadMusic(stream.videoUrl, videoFile, headers = stream.headers)
                                         }
                                     }
                                 } catch (e: Exception) {
@@ -1110,12 +1110,12 @@ private fun SearchResultItem(
                                 val stream = chain.streamUrlFor(t.source, t.id)
                                 val audioFile = Storage.getMusicFile(t.source, t.id)
                                 if (!audioFile.exists()) {
-                                    Storage.downloadMusic(stream.url, audioFile)
+                                    Storage.downloadMusic(stream.url, audioFile, headers = stream.headers)
                                 }
                                 if (t.source == "bilibili" && stream.videoUrl != null) {
                                     val videoFile = Storage.getVideoFile(t.source, t.id)
                                     if (!videoFile.exists()) {
-                                        Storage.downloadMusic(stream.videoUrl, videoFile)
+                                        Storage.downloadMusic(stream.videoUrl, videoFile, headers = stream.headers)
                                     }
                                 }
                             } catch (e: Exception) {

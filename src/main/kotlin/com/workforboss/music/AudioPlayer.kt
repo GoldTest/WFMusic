@@ -93,7 +93,7 @@ class AudioPlayer {
             withContext(Dispatchers.IO) {
                 try {
                     // 先下载音频，尽快播放
-                    Storage.downloadMusic(track.previewUrl, file)
+                    Storage.downloadMusic(track.previewUrl, file, headers = track.headers)
                     
                     // 音频下载完成后，开启后台任务下载视频（如果是 B 站）
                     if (track.source == "bilibili" && track.videoUrl != null) {
@@ -103,7 +103,7 @@ class AudioPlayer {
                             scope.launch(Dispatchers.IO) {
                                 try {
                                     println("AudioPlayer: Background downloading video for ${track.id}")
-                                    Storage.downloadMusic(track.videoUrl, videoFile)
+                                    Storage.downloadMusic(track.videoUrl, videoFile, headers = track.headers)
                                     println("AudioPlayer: Background video download finished for ${track.id}")
                                 } catch (e: Exception) {
                                     println("AudioPlayer: Background video download failed: ${e.message}")
@@ -156,7 +156,7 @@ class AudioPlayer {
                 scope.launch(Dispatchers.IO) {
                     try {
                         println("AudioPlayer: Background downloading video for ${onlineInfo.id} (from local audio play)")
-                        Storage.downloadMusic(onlineInfo.videoUrl, videoFile)
+                        Storage.downloadMusic(onlineInfo.videoUrl, videoFile, headers = onlineInfo.headers)
                         println("AudioPlayer: Background video download finished for ${onlineInfo.id}")
                     } catch (e: Exception) {
                         println("AudioPlayer: Background video download failed: ${e.message}")

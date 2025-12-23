@@ -216,7 +216,10 @@ class BilibiliSource : SourceAdapter {
             url {
                 parameters.append("bvid", id)
                 parameters.append("cid", cid.toString())
-                parameters.append("fnval", "16")
+                // fnval=1 表示请求传统的 MP4 格式 (durl)
+                // fnval=16 表示请求 DASH 格式
+                // 我们同时请求，优先使用 DASH 音频，但视频如果需要 JavaFX 播放，MP4 可能更稳
+                parameters.append("fnval", (1 or 16 or 128).toString())
             }
         }.body()
         
@@ -225,7 +228,7 @@ class BilibiliSource : SourceAdapter {
             throw IllegalStateException("Bilibili PlayURL API error: ${playResp.code}")
         }
         
-        // 优先获取音频流，选择 ID 最大的（音质最高）
+        // 1. 优先获取音频流 (从 DASH 中选最高质)
         val bestAudio = playResp.data?.dash?.audio?.maxByOrNull { it.id }
         val audioUrl = bestAudio?.baseUrl ?: playResp.data?.durl?.firstOrNull()?.url
             
@@ -234,21 +237,28 @@ class BilibiliSource : SourceAdapter {
             throw IllegalStateException("Audio URL not found")
         }
 
-        // 获取视频流，同样选择最高清晰度的
-        val bestVideo = playResp.data?.dash?.video?.maxByOrNull { it.id }
-        val videoUrl = bestVideo?.baseUrl
-        
-        val videoQualityLabel = when (bestVideo?.id) {
-            127 -> "8K"
-            120 -> "4K"
-            116 -> "1080P60"
-            112 -> "1080P+"
-            80 -> "1080P"
-            74 -> "720P60"
-            64 -> "720P"
-            32 -> "480P"
-            16 -> "360P"
-            else -> if (bestVideo != null) "Unknown(${bestVideo.id})" else null
+        // 2. 获取视频流
+        // JavaFX MediaPlayer 仅支持标准的 MP4 容器，不支持 .m4s (DASH 视频分段)
+        // 我们只在 durl (传统 MP4 模式) 中寻找有效的视频链接
+        var videoUrl = playResp.data?.durl?.firstOrNull { 
+            it.url.contains(".mp4") || it.url.contains(".flv") || !it.url.contains(".m4s") 
+        }?.url
+        var videoQualityLabel: String? = null
+        var videoWidth: Int? = null
+        var videoHeight: Int? = null
+
+        if (videoUrl != null) {
+            // 如果找到了 MP4/FLV (durl 模式)
+            videoQualityLabel = "MP4"
+            // durl 模式下 api 不直接返回宽高，设置默认值
+            videoWidth = 1920
+            videoHeight = 1080
+        } else {
+            // 如果 durl 中没有，说明当前视频可能只有 DASH 格式
+            // 提示：JavaFX 无法播放 DASH (.m4s)，所以我们不返回 videoUrl
+            // 这样 UI 就会显示“暂无视频”或者仅播放音频，而不是下载一个无法播放的文件
+            println("Bilibili: No compatible MP4 video stream found (only DASH available, which JavaFX cannot play)")
+            videoUrl = null
         }
 
         val qualityLabel = when (bestAudio?.id) {
@@ -265,8 +275,8 @@ class BilibiliSource : SourceAdapter {
             url = audioUrl,
             quality = qualityLabel,
             videoUrl = videoUrl,
-            videoWidth = bestVideo?.width,
-            videoHeight = bestVideo?.height,
+            videoWidth = videoWidth,
+            videoHeight = videoHeight,
             videoQuality = videoQualityLabel,
             headers = mapOf(
                 "User-Agent" to commonHeaders["User-Agent"]!!,
