@@ -104,6 +104,7 @@ class BilibiliVideoPlayer(
             }
         }
 
+        key(track.id) {
             Window(
                 onCloseRequest = { closeVideo() },
                 state = windowState,
@@ -124,9 +125,7 @@ class BilibiliVideoPlayer(
                         }
                     }
 
-                if (videoUrl.isNotBlank()) {
-                    key(track.id) {
-
+                    if (videoUrl.isNotBlank()) {
                         var isTransitioning by remember { mutableStateOf(true) }
                         val jfxPanel = remember { JFXPanel() }
                         var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
@@ -266,46 +265,46 @@ class BilibiliVideoPlayer(
                                     )
                                 }
                             }
-                                                }
                         }
-                } else {
-                    Text("正在准备视频资源...", color = androidx.compose.ui.graphics.Color.White, modifier = Modifier.align(Alignment.Center))
-                }
-
-                // 右下角控制区
-                Row(
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val quality = track.videoQuality ?: if (track.videoHeight != null) "${track.videoHeight}P" else "未知"
-                    Surface(
-                        color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f),
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text(
-                            text = quality,
-                            color = androidx.compose.ui.graphics.Color.White,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.caption
-                        )
+                    } else {
+                        Text("正在准备视频资源...", color = androidx.compose.ui.graphics.Color.White, modifier = Modifier.align(Alignment.Center))
                     }
-                    
-                    Spacer(Modifier.width(8.dp))
-                    
-                    Surface(
-                        color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f),
-                        shape = RoundedCornerShape(4.dp)
+
+                    // 右下角控制区
+                    Row(
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(
-                            onClick = { isFullscreen = !isFullscreen },
-                            modifier = Modifier.size(24.dp)
+                        val quality = track.videoQuality ?: if (track.videoHeight != null) "${track.videoHeight}P" else "未知"
+                        Surface(
+                            color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f),
+                            shape = RoundedCornerShape(4.dp)
                         ) {
-                            Icon(
-                                if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                                contentDescription = "Toggle Fullscreen",
-                                tint = androidx.compose.ui.graphics.Color.White,
-                                modifier = Modifier.size(18.dp)
+                            Text(
+                                text = quality,
+                                color = androidx.compose.ui.graphics.Color.White,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.caption
                             )
+                        }
+                        
+                        Spacer(Modifier.width(8.dp))
+                        
+                        Surface(
+                            color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            IconButton(
+                                onClick = { isFullscreen = !isFullscreen },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                    contentDescription = "Toggle Fullscreen",
+                                    tint = androidx.compose.ui.graphics.Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -313,8 +312,9 @@ class BilibiliVideoPlayer(
         }
     }
 
-    fun closeVideo() {
+    private fun closeVideo() {
         isVisible = false
         currentTrack = null
+        isFullscreen = false
     }
 }
