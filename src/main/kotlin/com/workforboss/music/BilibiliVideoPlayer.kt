@@ -32,6 +32,10 @@ import javafx.scene.media.MediaView
 import javafx.scene.paint.Color as JFXColor
 import kotlin.math.abs
 
+enum class PlayerState {
+    IDLE, LOADING, READY, ERROR
+}
+
 class BilibiliVideoPlayer(
     private val audioPlayer: AudioPlayer
 ) {
@@ -68,6 +72,9 @@ class BilibiliVideoPlayer(
             return
         }
         
+        // 确保使用 var 以允许修改（如果传入的 track 属性是可变的，或者我们在这里处理副本）
+        // 在 Kotlin 中参数是 val，所以我们应该处理 currentTrack 的逻辑
+        
         closeVideo()
         currentTrack = track
         isVisible = true
@@ -79,12 +86,14 @@ class BilibiliVideoPlayer(
         
         val track = currentTrack!!
         
+        val videoWidth = track.videoWidth ?: 1920
+        val videoHeight = track.videoHeight ?: 1080
+        val videoQuality = track.videoQuality ?: ""
+
         val screenSize = Toolkit.getDefaultToolkit().screenSize
         val screenHeight = screenSize.height
         val targetHeightPx = (screenHeight * 0.8).toInt()
         
-        val videoWidth = track.videoWidth ?: 1920
-        val videoHeight = track.videoHeight ?: 1080
         val ratio = videoWidth.toFloat() / videoHeight.toFloat()
         val targetWidthPx = (targetHeightPx * ratio).toInt()
 
@@ -98,46 +107,67 @@ class BilibiliVideoPlayer(
             placement = if (isFullscreen) WindowPlacement.Fullscreen else WindowPlacement.Floating
         )
         
-        LaunchedEffect(track.id) {
+        LaunchedEffect(track.id, widthDp, heightDp) {
             if (!isFullscreen) {
                 windowState.size = DpSize(widthDp, heightDp)
             }
         }
 
         key(track.id) {
+            val title = remember(track.title, videoQuality) {
+                val res = if (videoQuality.isNotBlank()) " [$videoQuality]" else ""
+                "Bilibili Video - ${track.title}$res"
+            }
             Window(
                 onCloseRequest = { closeVideo() },
                 state = windowState,
-                title = "Bilibili Video - ${track.title}",
+                title = title,
                 alwaysOnTop = isFullscreen,
                 undecorated = isFullscreen
             ) {
                 Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black)) {
-                    // 视频路径选择逻辑
-                    val videoUrl = remember(track.id) {
-                        val videoFile = Storage.getVideoFile(track.source, track.id)
-                        val partFile = File(videoFile.absolutePath + ".part")
-                        
-                        when {
-                            videoFile.exists() -> videoFile.toURI().toString()
-                            partFile.exists() && partFile.length() > 1024 * 1024 -> partFile.toURI().toString()
-                            else -> track.videoUrl ?: ""
+                    // 视频路径选择逻辑 - 增强版，支持轮询检查本地文件
+                    var videoUrl by remember(track.id) { mutableStateOf<String?>(null) }
+                    var isDownloading by remember(track.id) { mutableStateOf(false) }
+                    
+                    LaunchedEffect(track.id) {
+                        while (true) {
+                            val videoFile = Storage.getVideoFile(track.source, track.id)
+                            val partFile = File(videoFile.absolutePath + ".part")
+                            
+                            val path = when {
+                                videoFile.exists() -> videoFile.toURI().toString()
+                                // 放宽限制：只要 part 文件超过 1MB 且不是 m4s 分段格式，就允许尝试播放
+                                partFile.exists() && partFile.length() > 1 * 1024 * 1024 && !track.videoUrl.orEmpty().contains(".m4s") -> partFile.toURI().toString()
+                                else -> null
+                            }
+                            
+                            if (path != null) {
+                                videoUrl = path
+                                isDownloading = false
+                                break
+                            } else {
+                                isDownloading = true
+                                // 如果既没有本地文件，在线 URL 也为空，那可能真的没救了
+                                if (track.videoUrl.isNullOrBlank()) {
+                                    isDownloading = false
+                                    break
+                                }
+                            }
+                            delay(2000) // 每 2 秒检查一次本地文件是否准备好
                         }
                     }
 
-                    if (videoUrl.isNotBlank()) {
-                        var isTransitioning by remember { mutableStateOf(true) }
-                        val jfxPanel = remember { JFXPanel() }
+                    if (videoUrl != null) {
+                        var playerState by remember { mutableStateOf(PlayerState.IDLE) }
+                        var errorMessage by remember { mutableStateOf("") }
                         var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+                        var retryCount by remember { mutableStateOf(0) }
                         
-                        // 切换视频时，先给一点缓冲时间
-                        LaunchedEffect(track.id) {
-                            isTransitioning = true
-                            delay(400) // 停顿 400ms，确保旧资源释放且界面有明确切换感
-                            isTransitioning = false
-                        }
-
-                        // Initialize JavaFX Platform
+                        // 强制每次 track.id 变化时重新创建 JFXPanel，解决反复打开不恢复的问题
+                        val jfxPanel = remember(track.id) { JFXPanel() }
+                        
+                        // 1. 初始化 JavaFX Platform
                         LaunchedEffect(Unit) {
                             try {
                                 Platform.startup {}
@@ -146,7 +176,78 @@ class BilibiliVideoPlayer(
                             }
                         }
 
-                        // Handle playback and sync
+                        // 2. 创建和销毁 MediaPlayer 的核心逻辑
+                        LaunchedEffect(videoUrl, retryCount) {
+                            playerState = PlayerState.LOADING
+                            
+                            // 停止并清理旧的播放器
+                            withContext(Dispatchers.Main) {
+                                mediaPlayer?.let { oldPlayer ->
+                                    Platform.runLater {
+                                        oldPlayer.stop()
+                                        oldPlayer.dispose()
+                                    }
+                                    mediaPlayer = null
+                                }
+                            }
+
+                            delay(200) // 给系统一点喘息时间
+
+                            Platform.runLater {
+                                try {
+                                    val media = Media(videoUrl)
+                                    val player = MediaPlayer(media).apply {
+                                        isMute = true
+                                        cycleCount = MediaPlayer.INDEFINITE
+                                        // 增加缓冲区设置，减少卡顿
+                                        // 注意：JavaFX MediaPlayer 缓冲区设置有限，主要依赖系统网络层
+                                    }
+
+                                    player.onReady = Runnable {
+                                        Platform.runLater {
+                                            playerState = PlayerState.READY
+                                            val startPos = audioPlayer.positionSec.value
+                                            if (startPos > 0.1) {
+                                                player.seek(javafx.util.Duration.seconds(startPos))
+                                            }
+                                            if (audioPlayer.isPlaying.value) {
+                                                player.play()
+                                            }
+                                        }
+                                    }
+
+                                    player.onError = Runnable {
+                                        val err = player.error
+                                        Platform.runLater {
+                                            println("VideoPlayer Media Error (retry=$retryCount): ${err?.message}")
+                                            if (retryCount < 3) {
+                                                retryCount++
+                                            } else {
+                                                playerState = PlayerState.ERROR
+                                                errorMessage = err?.message ?: "未知错误"
+                                            }
+                                        }
+                                    }
+
+                                    val mediaView = MediaView(player)
+                                    val root = StackPane(mediaView)
+                                    root.style = "-fx-background-color: black;"
+                                    mediaView.preserveRatioProperty().set(true)
+                                    mediaView.fitWidthProperty().bind(root.widthProperty())
+                                    mediaView.fitHeightProperty().bind(root.heightProperty())
+                                    
+                                    val scene = Scene(root, JFXColor.BLACK)
+                                    jfxPanel.scene = scene
+                                    mediaPlayer = player
+                                } catch (e: Exception) {
+                                    println("VideoPlayer Init Error: ${e.message}")
+                                    playerState = PlayerState.ERROR
+                                    errorMessage = e.message ?: "初始化失败"
+                                }
+                            }
+                        }
+
+                        // 3. 处理播放/暂停同步
                         DisposableEffect(mediaPlayer, audioPlayer.isPlaying.value) {
                             val player = mediaPlayer ?: return@DisposableEffect onDispose {}
                             
@@ -160,7 +261,7 @@ class BilibiliVideoPlayer(
                             
                             Platform.runLater {
                                 player.statusProperty().addListener(statusListener)
-                                if (player.status != MediaPlayer.Status.UNKNOWN) {
+                                if (player.status == MediaPlayer.Status.READY || player.status == MediaPlayer.Status.PLAYING || player.status == MediaPlayer.Status.PAUSED) {
                                     if (audioPlayer.isPlaying.value) player.play() else player.pause()
                                 }
                             }
@@ -172,17 +273,16 @@ class BilibiliVideoPlayer(
                             }
                         }
 
+                        // 4. 处理进度同步
                         LaunchedEffect(mediaPlayer) {
                             val player = mediaPlayer ?: return@LaunchedEffect
                             while (true) {
-                                if (player.status != MediaPlayer.Status.UNKNOWN && player.status != MediaPlayer.Status.STALLED) {
+                                if (player.status == MediaPlayer.Status.PLAYING || player.status == MediaPlayer.Status.PAUSED) {
                                     val audioPos = audioPlayer.positionSec.value
                                     Platform.runLater {
-                                        if (player.status == MediaPlayer.Status.PLAYING || player.status == MediaPlayer.Status.PAUSED) {
-                                            val videoPos = player.currentTime.toSeconds()
-                                            if (abs(audioPos - videoPos) > 1.2) {
-                                                player.seek(javafx.util.Duration.seconds(audioPos))
-                                            }
+                                        val videoPos = player.currentTime.toSeconds()
+                                        if (abs(audioPos - videoPos) > 1.2) {
+                                            player.seek(javafx.util.Duration.seconds(audioPos))
                                         }
                                     }
                                 }
@@ -190,8 +290,8 @@ class BilibiliVideoPlayer(
                             }
                         }
 
-                        // Cleanup
-                        DisposableEffect(Unit) {
+                        // 5. 最终清理
+                        DisposableEffect(track.id) {
                             onDispose {
                                 Platform.runLater {
                                     mediaPlayer?.stop()
@@ -202,61 +302,13 @@ class BilibiliVideoPlayer(
                         }
 
                         Box(Modifier.fillMaxSize()) {
-                            var isPlayerReady by remember { mutableStateOf(false) }
-
                             SwingPanel(
-                                factory = {
-                                    jfxPanel.apply {
-                                        Platform.runLater {
-                                            try {
-                                                val media = Media(videoUrl)
-                                                val player = MediaPlayer(media).apply {
-                                                    isMute = true
-                                                    cycleCount = MediaPlayer.INDEFINITE
-                                                }
-                                                
-                                                player.onReady = Runnable {
-                                                    Platform.runLater {
-                                                        try {
-                                                            val startPos = audioPlayer.positionSec.value
-                                                            if (startPos > 0.1) {
-                                                                player.seek(javafx.util.Duration.seconds(startPos))
-                                                            }
-                                                            if (audioPlayer.isPlaying.value) {
-                                                                player.play()
-                                                            }
-                                                            isPlayerReady = true
-                                                        } catch (e: Exception) {
-                                                            println("VideoPlayer onReady Error: ${e.message}")
-                                                        }
-                                                    }
-                                                }
-
-                                                player.onError = Runnable {
-                                                    println("VideoPlayer Media Error: ${player.error?.message}")
-                                                }
-                                                
-                                                val mediaView = MediaView(player)
-                                                val root = StackPane(mediaView)
-                                                root.style = "-fx-background-color: black;"
-                                                mediaView.preserveRatioProperty().set(true)
-                                                mediaView.fitWidthProperty().bind(root.widthProperty())
-                                                mediaView.fitHeightProperty().bind(root.heightProperty())
-                                                
-                                                val scene = Scene(root, JFXColor.BLACK)
-                                                jfxPanel.scene = scene
-                                                mediaPlayer = player
-                                            } catch (e: Exception) {
-                                                println("VideoPlayer Factory Error: ${e.message}")
-                                            }
-                                        }
-                                    }
-                                },
+                                factory = { jfxPanel },
                                 modifier = Modifier.fillMaxSize()
                             )
                             
-                            // 过渡遮罩，当正在切换或播放器还没准备好时显示
-                            if (isTransitioning || !isPlayerReady) {
+                            // 过渡遮罩，当正在加载或出错时显示
+                            if (playerState == PlayerState.LOADING || playerState == PlayerState.IDLE) {
                                 Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black)) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.align(Alignment.Center).size(32.dp),
@@ -264,10 +316,39 @@ class BilibiliVideoPlayer(
                                         strokeWidth = 2.dp
                                     )
                                 }
+                            } else if (playerState == PlayerState.ERROR) {
+                                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black)) {
+                                    Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(Icons.Default.Error, null, tint = androidx.compose.ui.graphics.Color.Red, modifier = Modifier.size(48.dp))
+                                        Spacer(Modifier.height(8.dp))
+                                        Text("视频加载失败: $errorMessage", color = androidx.compose.ui.graphics.Color.White)
+                                        Button(onClick = { retryCount = 0; retryCount++ }, Modifier.padding(top = 16.dp)) {
+                                            Text("重试")
+                                        }
+                                    }
+                                }
                             }
                         }
                     } else {
-                        Text("正在准备视频资源...", color = androidx.compose.ui.graphics.Color.White, modifier = Modifier.align(Alignment.Center))
+                        Column(
+                            modifier = Modifier.align(Alignment.Center),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            if (isDownloading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(32.dp),
+                                    color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.5f),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(Modifier.height(16.dp))
+                                Text("正在下载并准备视频资源...", color = androidx.compose.ui.graphics.Color.White)
+                                Text("请稍候，音频正在播放中", style = MaterialTheme.typography.caption, color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.5f))
+                            } else {
+                                Icon(Icons.Default.VideoLibrary, null, tint = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.3f), modifier = Modifier.size(48.dp))
+                                Spacer(Modifier.height(16.dp))
+                                Text("未找到视频资源", color = androidx.compose.ui.graphics.Color.White)
+                            }
+                        }
                     }
 
                     // 右下角控制区

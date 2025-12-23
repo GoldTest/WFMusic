@@ -56,13 +56,16 @@ object Storage {
         val tmp = File(target.absolutePath + ".part")
         try {
             val conn = URI(url).toURL().openConnection()
-            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+            // 使用更像真实浏览器的 User-Agent
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             if (url.contains("qqmusic") || url.contains("qq.com")) {
                 conn.setRequestProperty("Referer", "https://y.qq.com/")
             } else if (url.contains("migu.cn")) {
                 conn.setRequestProperty("Referer", "https://m.music.migu.cn/")
             } else if (url.contains("bilibili.com") || url.contains("bilivideo.com")) {
                 conn.setRequestProperty("Referer", "https://www.bilibili.com/")
+                // B 站视频有时需要特定的 Origin
+                conn.setRequestProperty("Origin", "https://www.bilibili.com")
             }
             
             val totalSize = conn.contentLengthLong
