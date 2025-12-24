@@ -80,71 +80,116 @@ class AudioPlayer {
         }
     }
 
+    private fun showSourceTip(source: String?) {
+        val name = when(source?.lowercase()) {
+            "netease" -> "网易云音乐"
+            "qq" -> "QQ音乐"
+            "kugou" -> "酷狗音乐"
+            "kuwo" -> "酷我音乐"
+            "migu" -> "咪咕音乐"
+            "bilibili" -> "Bilibili"
+            "itunes" -> "iTunes"
+            "local" -> "本地音乐"
+            else -> "未知来源"
+        }
+        _error.value = "正在播放: $name"
+        // 3秒后自动清除提示，除非已经有了真正的错误
+        scope.launch {
+            delay(3000)
+            if (_error.value?.startsWith("正在播放:") == true) {
+                _error.value = null
+            }
+        }
+    }
+
     suspend fun loadOnline(track: OnlineTrack) {
         loadJob?.cancelAndJoin()
-        val job = currentCoroutineContext()[Job]
-        loadJob = job
+        // 使用独立作用域启动加载任务，不受调用方生命周期直接限制
+        val currentJob = Job()
+        loadJob = currentJob
         
         stop(fadeOut = false, resetPlayingState = false)
         _currentOnlineTrack.value = track
-        _error.value = "正在缓冲..."
+        showSourceTip(track.source)
         
-        val file = Storage.getMusicFile(track.source, track.id)
-        if (!file.exists()) {
-            withContext(Dispatchers.IO) {
-                try {
-                    // 先下载音频，尽快播放
-                    Storage.downloadMusic(track.previewUrl, file, headers = track.headers)
-                    
-                    // 音频下载完成后，开启后台任务下载视频（如果是 B 站）
-                    if (track.source == "bilibili" && track.videoUrl != null) {
-                        val videoFile = Storage.getVideoFile(track.source, track.id)
-                        if (!videoFile.exists()) {
-                            // 后台异步下载视频，不阻塞音频播放
-                            scope.launch(Dispatchers.IO) {
-                                try {
-                                    println("AudioPlayer: Background downloading video for ${track.id}")
-                                    Storage.downloadMusic(track.videoUrl, videoFile, headers = track.headers)
-                                    println("AudioPlayer: Background video download finished for ${track.id}")
-                                } catch (e: Exception) {
-                                    println("AudioPlayer: Background video download failed: ${e.message}")
+        scope.launch(currentJob) {
+            try {
+                val file = Storage.getMusicFile(track.source, track.id)
+                if (!file.exists()) {
+                    withContext(Dispatchers.IO) {
+                        try {
+                            // 先下载音频，尽快播放
+                            Storage.downloadMusic(track.previewUrl, file, headers = track.headers)
+                            
+                            // 音频下载完成后，开启后台任务下载视频（如果是 B 站）
+                            if (track.source == "bilibili" && track.videoUrl != null) {
+                                val videoFile = Storage.getVideoFile(track.source, track.id)
+                                if (!videoFile.exists()) {
+                                    // 后台异步下载视频，不阻塞音频播放
+                                    scope.launch(Dispatchers.IO) {
+                                        try {
+                                            println("AudioPlayer: Background downloading video for ${track.id}")
+                                            Storage.downloadMusic(track.videoUrl, videoFile, headers = track.headers)
+                                            println("AudioPlayer: Background video download finished for ${track.id}")
+                                        } catch (e: Exception) {
+                                            println("AudioPlayer: Background video download failed: ${e.message}")
+                                        }
+                                    }
                                 }
                             }
+                        } catch (e: Exception) {
+                            if (e !is CancellationException) {
+                                _error.value = "下载失败: ${e.message}"
+                            }
+                            throw e
                         }
                     }
-                } catch (e: Exception) {
-                    _error.value = "下载失败: ${e.message}"
-                    return@withContext
                 }
+                
+                if (file.exists()) {
+                    // 如果正在下载或文件还很小，loadLocal 内部会处理重试
+                    loadLocal(LocalTrack(
+                        id = track.id,
+                        title = track.title,
+                        artist = track.artist,
+                        album = track.album,
+                        durationMillis = track.durationMillis,
+                        path = file.absolutePath,
+                        source = track.source
+                    ), onlineInfo = track)
+                } else {
+                    _error.value = "无法获取音频文件"
+                }
+            } catch (e: CancellationException) {
+                // 正常取消，不更新错误状态
+            } catch (e: Exception) {
+                _error.value = "播放失败: ${e.message}"
             }
-        }
-        
-        if (file.exists()) {
-            loadLocal(LocalTrack(
-                id = track.id,
-                title = track.title,
-                artist = track.artist,
-                album = track.album,
-                durationMillis = track.durationMillis,
-                path = file.absolutePath,
-                source = track.source
-            ), onlineInfo = track)
-        } else {
-            _error.value = "无法获取音频文件"
         }
     }
 
     suspend fun loadLocal(track: LocalTrack, onlineInfo: OnlineTrack? = null) {
-        // 取消之前的加载任务
-        loadJob?.cancelAndJoin()
-        isPendingPlay = false // 重置待播放状态
+        // 取消之前的加载任务（注意：如果是 loadOnline 调用的，这里的 cancel 会取消 loadOnline 的 currentJob）
+        // 我们需要区分是“用户点击切歌”还是“系统内部流转”
+        if (onlineInfo == null) {
+            loadJob?.cancelAndJoin()
+            isPendingPlay = false
+        }
         
-        val currentJob = Job(currentCoroutineContext()[Job])
-        loadJob = currentJob
+        val currentJob = Job()
+        // 只有当没有活跃的 loadJob 或者这是顶层调用时才更新 loadJob
+        if (onlineInfo == null || loadJob?.isActive != true) {
+            loadJob = currentJob
+        }
         
         // 内部加载函数
         suspend fun doLoad(attempt: Int = 0) {
             if (!currentJob.isActive) return
+            
+            // 顶层调用时显示来源提示
+            if (attempt == 0 && onlineInfo == null) {
+                showSourceTip(track.source)
+            }
             
             // 确保旧的播放器完全释放，但不重置 UI 播放意图
             stop(fadeOut = false, resetPlayingState = false)
@@ -172,7 +217,7 @@ class AudioPlayer {
                     if (file.length() < 1024) {
                          // 如果文件太小，可能还没写完，重试
                          if (attempt < 2) {
-                             scope.launch { doLoad(attempt + 1) }
+                             scope.launch(currentJob) { doLoad(attempt + 1) }
                              return@withContext
                          }
                     }
@@ -187,6 +232,7 @@ class AudioPlayer {
                     player.onReady = Runnable {
                         if (mediaPlayer === player && currentJob.isActive) {
                             _durationSec.value = media.duration.toSeconds()
+                            _error.value = null // 加载成功，清除所有报错或“缓冲中”提示
                             
                             // 修正：只要 _isPlaying 为 true，或者有待播放标记，就强制播放
                             if (isPendingPlay || _isPlaying.value) {
@@ -277,7 +323,7 @@ class AudioPlayer {
         }
 
         // 开始加载
-        scope.launch {
+        scope.launch(currentJob) {
             try {
                 doLoad(0)
             } catch (e: CancellationException) {
