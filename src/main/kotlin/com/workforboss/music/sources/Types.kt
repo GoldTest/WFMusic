@@ -35,5 +35,6 @@ interface SourceAdapter {
     suspend fun search(q: String, page: Int = 1): List<Track>
     suspend fun streamUrl(id: String): StreamResult
     suspend fun lyrics(id: String): String?
+    suspend fun recommendations(page: Int = 1): List<Track> = emptyList()
 }
 

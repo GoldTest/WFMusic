@@ -188,6 +188,44 @@ class BilibiliSource : SourceAdapter {
         }
     }
 
+    override suspend fun recommendations(page: Int): List<Track> {
+        ensureBuvid()
+        return runCatching {
+            // rid=129 为舞蹈分区
+            val resp: BilibiliRankingResp = client.get("https://api.bilibili.com/x/web-interface/ranking/v2") {
+                headers {
+                    commonHeaders.forEach { (k, v) -> append(k, v) }
+                    append("Cookie", "buvid3=$buvid3; buvid4=$buvid4")
+                }
+                url {
+                    parameters.append("rid", "129")
+                    parameters.append("type", "all")
+                }
+            }.body()
+
+            if (resp.code != 0) {
+                println("Bilibili ranking error: ${resp.code} ${resp.message}")
+                return emptyList()
+            }
+
+            resp.data?.list?.map { item ->
+                Track(
+                    id = item.bvid,
+                    title = cleanTitle(item.title),
+                    artist = item.owner?.name ?: "Unknown",
+                    album = "Bilibili 舞蹈榜",
+                    durationMs = item.duration.toLong() * 1000,
+                    coverUrl = if (item.pic.startsWith("//")) "https:${item.pic}" else item.pic,
+                    quality = "点击解析",
+                    source = "bilibili"
+                )
+            } ?: emptyList()
+        }.getOrElse {
+            println("Bilibili recommendations failed: ${it.message}")
+            emptyList()
+        }
+    }
+
     private fun cleanTitle(title: String) = title.replace(Regex("<[^>]*>"), "").replace("&amp;", "&").replace("&quot;", "\"")
 
     override suspend fun streamUrl(id: String): StreamResult {
@@ -207,6 +245,8 @@ class BilibiliSource : SourceAdapter {
         }
         
         val cid = viewResp.data?.cid ?: throw IllegalStateException("CID not found")
+        val dimension = viewResp.data?.dimension
+        
         val playResp: BilibiliPlayResp = client.get("https://api.bilibili.com/x/player/playurl") {
             headers { 
                 commonHeaders.forEach { (k, v) -> append(k, v) }
@@ -250,9 +290,21 @@ class BilibiliSource : SourceAdapter {
         if (videoUrl != null) {
             // 如果找到了 MP4/FLV (durl 模式)
             videoQualityLabel = "MP4"
-            // durl 模式下 api 不直接返回宽高，设置默认值
-            videoWidth = 1920
-            videoHeight = 1080
+            
+            if (dimension != null && dimension.width > 0 && dimension.height > 0) {
+                if (dimension.rotate == 1) {
+                    // 旋转 90 度的情况，宽高互换
+                    videoWidth = dimension.height
+                    videoHeight = dimension.width
+                } else {
+                    videoWidth = dimension.width
+                    videoHeight = dimension.height
+                }
+            } else {
+                // 默认 1080p
+                videoWidth = 1920
+                videoHeight = 1080
+            }
         } else {
             // 如果 durl 中没有，说明当前视频可能只有 DASH 格式
             // 提示：JavaFX 无法播放 DASH (.m4s)，所以我们不返回 videoUrl
@@ -333,7 +385,17 @@ data class BilibiliSearchResultItem(
 @Serializable
 data class BilibiliViewResp(val code: Int = 0, val data: BilibiliViewData? = null)
 @Serializable
-data class BilibiliViewData(val cid: Long? = null)
+data class BilibiliViewData(
+    val cid: Long? = null,
+    val dimension: BilibiliDimension? = null
+)
+
+@Serializable
+data class BilibiliDimension(
+    val width: Int = 0,
+    val height: Int = 0,
+    val rotate: Int = 0
+)
 
 @Serializable
 data class BilibiliPlayResp(val code: Int = 0, val data: BilibiliPlayData? = null)
@@ -356,3 +418,18 @@ data class BilibiliVideoItem(
 )
 @Serializable
 data class BilibiliDurl(val url: String = "")
+
+@Serializable
+data class BilibiliRankingResp(val code: Int = 0, val message: String? = null, val data: BilibiliRankingData? = null)
+@Serializable
+data class BilibiliRankingData(val list: List<BilibiliRankingItem>? = null)
+@Serializable
+data class BilibiliRankingItem(
+    val bvid: String = "",
+    val title: String = "",
+    val pic: String = "",
+    val duration: Int = 0,
+    val owner: BilibiliOwner? = null
+)
+@Serializable
+data class BilibiliOwner(val name: String = "")

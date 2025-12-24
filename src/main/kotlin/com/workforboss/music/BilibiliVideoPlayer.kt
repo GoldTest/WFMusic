@@ -91,11 +91,28 @@ class BilibiliVideoPlayer(
         val videoQuality = track.videoQuality ?: ""
 
         val screenSize = Toolkit.getDefaultToolkit().screenSize
+        val screenWidth = screenSize.width
         val screenHeight = screenSize.height
-        val targetHeightPx = (screenHeight * 0.8).toInt()
         
-        val ratio = videoWidth.toFloat() / videoHeight.toFloat()
-        val targetWidthPx = (targetHeightPx * ratio).toInt()
+        // 设定最大占用屏幕的 80%
+        val maxTargetWidth = (screenWidth * 0.8).toInt()
+        val maxTargetHeight = (screenHeight * 0.8).toInt()
+        
+        val videoRatio = videoWidth.toFloat() / videoHeight.toFloat()
+        
+        var targetWidthPx: Int
+        var targetHeightPx: Int
+        
+        // 根据视频比例计算最佳尺寸，确保不超出最大限制
+        if (videoRatio > (maxTargetWidth.toFloat() / maxTargetHeight.toFloat())) {
+            // 视频较宽，以宽度为准
+            targetWidthPx = maxTargetWidth
+            targetHeightPx = (targetWidthPx / videoRatio).toInt()
+        } else {
+            // 视频较窄（或比例一致），以高度为准
+            targetHeightPx = maxTargetHeight
+            targetWidthPx = (targetHeightPx * videoRatio).toInt()
+        }
 
         val density = androidx.compose.ui.platform.LocalDensity.current
         val widthDp = with(density) { targetWidthPx.toDp() }

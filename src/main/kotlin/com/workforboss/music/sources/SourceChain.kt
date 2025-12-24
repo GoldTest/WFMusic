@@ -53,4 +53,13 @@ class SourceChain {
         // 其他源通常在 search 时已经有了
         return null
     }
+
+    suspend fun recommendations(page: Int = 1): List<Track> = coroutineScope {
+        val jobs = order.map { name ->
+            async {
+                adapters[name]?.recommendations(page) ?: emptyList()
+            }
+        }
+        jobs.awaitAll().flatten().shuffled()
+    }
 }

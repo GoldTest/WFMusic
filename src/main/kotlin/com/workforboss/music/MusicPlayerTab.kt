@@ -63,7 +63,7 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
     val focusRequester = remember { FocusRequester() }
 
     // 分平台搜索状态
-    val sources = listOf("all", "local", "bilibili", "netease", "qq", "kugou", "kuwo", "migu", "itunes")
+    val sources = listOf("recommend", "all", "local", "bilibili", "netease", "qq", "kugou", "kuwo", "migu", "itunes")
     var selectedTab by remember { mutableStateOf(0) }
     val sourceResults = remember { mutableStateMapOf<String, List<Track>>() }
     val sourceLoading = remember { mutableStateMapOf<String, Boolean>() }
@@ -226,7 +226,7 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
     }
 
     val loadMore = { source: String ->
-        if (source != "all" && source != "local" && sourceLoadingMore[source] != true && !searchText.isBlank()) {
+        if (source != "all" && source != "local" && source != "recommend" && sourceLoadingMore[source] != true && !searchText.isBlank()) {
             scope.launch(Dispatchers.IO) {
                 sourceLoadingMore[source] = true
                 val nextPage = (sourcePages[source] ?: 1) + 1
@@ -260,6 +260,20 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
     LaunchedEffect(listState, selectedTab) {
         // 切换标签时回到顶部
         listState.scrollToItem(0)
+        
+        // 如果切到推荐页且没数据，自动加载
+        if (sources[selectedTab] == "recommend" && (sourceResults["recommend"]?.isEmpty() != false)) {
+            scope.launch(Dispatchers.IO) {
+                sourceLoading["recommend"] = true
+                runCatching {
+                    val res = chain.recommendations()
+                    sourceResults["recommend"] = res
+                }.onFailure {
+                    sourceError["recommend"] = it.message
+                }
+                sourceLoading["recommend"] = false
+            }
+        }
         
         snapshotFlow { listState.layoutInfo.visibleItemsInfo }
             .collect { visibleItems ->
@@ -308,7 +322,11 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
                     Column(Modifier.fillMaxSize().padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                if (sources[selectedTab] == "local") "本地音乐管理" else "搜索结果",
+                                when (sources[selectedTab]) {
+                                    "local" -> "本地音乐管理"
+                                    "recommend" -> "每日推荐"
+                                    else -> "搜索结果"
+                                },
                                 style = MaterialTheme.typography.h6,
                                 color = MaterialTheme.colors.primary
                             )
