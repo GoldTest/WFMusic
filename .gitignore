@@ -1,19 +1,43 @@
+# OS specific files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+
+# Gradle files
+.gradle/
+build/
+/out/
+/bin/
+
+# Kotlin/JVM files
+*.class
 *.log
 *.tmp
+*.pyc
 *.swp
 *.swo
+.kotlin/
 
-# Build and IDE files
-/build/
-.gradle/
+# IntelliJ IDEA
 .idea/
 *.iml
+*.iws
+.idea_modules/
+
+# VS Code
 .vscode/
-out/
-bin/
-*.class
+
+# Local configuration
+local.properties
+.env
+.env.local
+
+# Build artifacts
+/META-INF/
 
 # Gradle wrapper
 !.gradle/wrapper/gradle-wrapper.jar
