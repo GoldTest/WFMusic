@@ -30,6 +30,7 @@ class AudioPlayer {
     val currentOnlineTrack: StateFlow<OnlineTrack?> = _currentOnlineTrack
 
     private var loadJob: Job? = null
+    private var isPendingPlay = false
     var onFinished: (() -> Unit)? = null
     private var currentVolume: Double = 0.8
 
@@ -84,7 +85,7 @@ class AudioPlayer {
         val job = currentCoroutineContext()[Job]
         loadJob = job
         
-        stop(fadeOut = false)
+        stop(fadeOut = false, resetPlayingState = false)
         _currentOnlineTrack.value = track
         _error.value = "正在缓冲..."
         
@@ -134,88 +135,168 @@ class AudioPlayer {
     }
 
     suspend fun loadLocal(track: LocalTrack, onlineInfo: OnlineTrack? = null) {
-        // 如果不是由 loadOnline 调用的（loadJob 不匹配），则处理 Job
-        val currentJob = currentCoroutineContext()[Job]
-        if (loadJob != currentJob) {
-            loadJob?.cancelAndJoin()
-            loadJob = currentJob
+        // 取消之前的加载任务
+        loadJob?.cancelAndJoin()
+        isPendingPlay = false // 重置待播放状态
+        
+        val currentJob = Job(currentCoroutineContext()[Job])
+        loadJob = currentJob
+        
+        // 内部加载函数
+        suspend fun doLoad(attempt: Int = 0) {
+            if (!currentJob.isActive) return
+            
+            // 确保旧的播放器完全释放，但不重置 UI 播放意图
+            stop(fadeOut = false, resetPlayingState = false)
+            
+            _currentOnlineTrack.value = onlineInfo
+            currentPath = track.path
+            _durationSec.value = track.durationMillis?.let { it / 1000.0 }
+            
+            // 指数级退避延迟
+            val waitTime = when(attempt) {
+                0 -> 400L
+                1 -> 1200L
+                else -> 2500L
+            }
+            delay(waitTime)
+            
+            if (!currentJob.isActive) return
+
+            withContext(Dispatchers.Main) {
+                try {
+                    val file = File(track.path)
+                    if (!file.exists()) throw Exception("文件不存在: ${track.path}")
+                    
+                    // 检查文件是否可读且不为空（防止下载中的残留）
+                    if (file.length() < 1024) {
+                         // 如果文件太小，可能还没写完，重试
+                         if (attempt < 2) {
+                             scope.launch { doLoad(attempt + 1) }
+                             return@withContext
+                         }
+                    }
+
+                    val uri = file.toURI().toString()
+                    val media = Media(uri)
+                    currentMedia = media
+                    
+                    val player = MediaPlayer(media)
+                    applyVolumeAndBoost(player, currentVolume)
+                    
+                    player.onReady = Runnable {
+                        if (mediaPlayer === player && currentJob.isActive) {
+                            _durationSec.value = media.duration.toSeconds()
+                            
+                            // 修正：只要 _isPlaying 为 true，或者有待播放标记，就强制播放
+                            if (isPendingPlay || _isPlaying.value) {
+                                println("AudioPlayer: Auto-starting playback onReady (pending=$isPendingPlay, isPlaying=${_isPlaying.value})")
+                                isPendingPlay = false
+                                _isPlaying.value = true
+                                
+                                Platform.runLater {
+                                    if (mediaPlayer === player && player.status != MediaPlayer.Status.DISPOSED) {
+                                        applyVolumeAndBoost(player, currentVolume)
+                                        player.play()
+                                        
+                                        // 绑定进度监听器
+                                        progressListener?.let { player.currentTimeProperty().removeListener(it) }
+                                        val listener = javafx.beans.value.ChangeListener<javafx.util.Duration> { _, _, newValue ->
+                                            if (mediaPlayer === player && player.status != MediaPlayer.Status.DISPOSED) {
+                                                _positionSec.value = newValue.toSeconds()
+                                            }
+                                        }
+                                        progressListener = listener
+                                        player.currentTimeProperty().addListener(listener)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    player.onEndOfMedia = Runnable {
+                        if (mediaPlayer === player) {
+                            _isPlaying.value = false
+                            _positionSec.value = _durationSec.value ?: 0.0
+                            onFinished?.invoke()
+                        }
+                    }
+                    
+                    player.onError = Runnable {
+                        if (mediaPlayer === player) {
+                            val err = player.error
+                            val errMsg = err?.message ?: "Unknown error"
+                            val errType = err?.type?.name ?: "UNKNOWN"
+                            
+                            println("AudioPlayer: MediaPlayer Error (attempt $attempt): [$errType] $errMsg")
+                            
+                            // 针对特定错误进行重试，必须在 currentJob 仍然活跃的情况下
+                            if (currentJob.isActive && attempt < 3 && 
+                                (errMsg.contains("ERROR_MEDIA_INVALID") || 
+                                 errType == "MEDIA_INACCESSIBLE" || 
+                                 errMsg.contains("0x80040265") ||
+                                 errMsg.contains("HALT"))) {
+                                
+                                println("AudioPlayer: Transient error detected, retrying...")
+                                // 在主线程之外启动重试，以避免阻塞
+                                scope.launch {
+                                    if (currentJob.isActive) {
+                                        doLoad(attempt + 1)
+                                    }
+                                }
+                                return@Runnable
+                            }
+
+                            _error.value = "播放错误: $errMsg"
+                            _isPlaying.value = false
+                        }
+                    }
+                    
+                    mediaPlayer = player
+                    _error.value = null
+                    
+                } catch (e: Exception) {
+                    if (currentJob.isActive) {
+                        println("AudioPlayer: Load error: ${e.message}")
+                        _error.value = "加载失败: ${e.message}"
+                    }
+                }
+            }
         }
 
-        // 确保旧的播放器完全释放 (不使用淡出效果)
-        stop(fadeOut = false)
-        
-        // 更新状态
-        _currentOnlineTrack.value = onlineInfo
-        currentPath = track.path
-        _durationSec.value = track.durationMillis?.let { it / 1000.0 }
-        
-        // 检查是否需要后台下载视频 (针对 B 站收藏播放)
+        // 检查视频下载（B站专用）
         if (onlineInfo != null && onlineInfo.source == "bilibili" && onlineInfo.videoUrl != null) {
             val videoFile = Storage.getVideoFile(onlineInfo.source, onlineInfo.id)
             if (!videoFile.exists()) {
                 scope.launch(Dispatchers.IO) {
                     try {
-                        println("AudioPlayer: Background downloading video for ${onlineInfo.id} (from local audio play)")
                         Storage.downloadMusic(onlineInfo.videoUrl, videoFile, headers = onlineInfo.headers)
-                        println("AudioPlayer: Background video download finished for ${onlineInfo.id}")
-                    } catch (e: Exception) {
-                        println("AudioPlayer: Background video download failed: ${e.message}")
-                    }
+                    } catch (e: Exception) {}
                 }
             }
         }
-        
-        // 增加延迟，确保 native 资源彻底释放
-        delay(300)
-        
-        withContext(Dispatchers.Main) {
+
+        // 开始加载
+        scope.launch {
             try {
-                val file = File(track.path)
-                if (!file.exists()) throw Exception("文件不存在: ${track.path}")
-                
-                val uri = file.toURI().toString()
-                
-                // 显式持有 Media 引用
-                val media = Media(uri)
-                currentMedia = media
-                
-                val player = MediaPlayer(media)
-                
-                applyVolumeAndBoost(player, currentVolume)
-                player.onReady = Runnable {
-                    if (mediaPlayer === player) {
-                        _durationSec.value = media.duration.toSeconds()
-                    }
-                }
-                player.onEndOfMedia = Runnable {
-                    if (mediaPlayer === player) {
-                        _isPlaying.value = false
-                        _positionSec.value = _durationSec.value ?: 0.0
-                        onFinished?.invoke()
-                    }
-                }
-                player.onError = Runnable {
-                    if (mediaPlayer === player) {
-                        val err = player.error?.message ?: "Unknown error"
-                        println("AudioPlayer: MediaPlayer Error: $err")
-                        _error.value = "播放错误: $err"
-                        _isPlaying.value = false
-                    }
-                }
-                
-                mediaPlayer = player
-                _error.value = null
-            } catch (e: Exception) {
-                println("AudioPlayer: Load error: ${e.message}")
-                _error.value = "加载失败: ${e.message}"
+                doLoad(0)
+            } catch (e: CancellationException) {
+                // 任务被取消，正常退出
             }
         }
     }
 
     fun play(fadeIn: Boolean = false) {
-        val player = mediaPlayer ?: return
-        if (_isPlaying.value) return
-
+        _isPlaying.value = true // 立即同步 UI 状态
+        val player = mediaPlayer
+        if (player == null) {
+            // 如果播放器还没准备好，标记为待播放
+            if (loadJob?.isActive == true) {
+                isPendingPlay = true
+            }
+            return
+        }
+        
         Platform.runLater {
             try {
                 if (mediaPlayer === player && player.status != MediaPlayer.Status.DISPOSED) {
@@ -255,7 +336,13 @@ class AudioPlayer {
     }
 
     fun pause() {
-        val player = mediaPlayer ?: return
+        isPendingPlay = false
+        val player = mediaPlayer
+        if (player == null) {
+            _isPlaying.value = false
+            return
+        }
+        
         if (!_isPlaying.value) return
         
         _isPlaying.value = false
@@ -296,17 +383,19 @@ class AudioPlayer {
         }
     }
 
-    suspend fun stop(fadeOut: Boolean = false) {
+    suspend fun stop(fadeOut: Boolean = false, resetPlayingState: Boolean = true) {
         if (fadeOut && _isPlaying.value) {
             smoothFadeVolume(0.0)
         }
         withContext(Dispatchers.Main) {
-            performStop()
+            performStop(resetPlayingState)
         }
     }
 
-    private fun performStop() {
-        _isPlaying.value = false
+    private fun performStop(resetPlayingState: Boolean = true) {
+        if (resetPlayingState) {
+            _isPlaying.value = false
+        }
         val player = mediaPlayer
         mediaPlayer = null
         currentMedia = null

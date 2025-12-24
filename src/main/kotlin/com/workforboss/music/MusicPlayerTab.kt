@@ -102,50 +102,58 @@ private fun MusicPlayerContent(onNavigateToSettings: () -> Unit) {
     var showRenameDialog by remember { mutableStateOf<String?>(null) } // playlistId
 
     // 定义播放下一首的逻辑
+    var isSwitching by remember { mutableStateOf(false) }
     val playNext = {
-        val pid = playingPlaylistId
-        val idx = playingIndex
-        if (pid != null && idx != -1) {
-            val playlist = library.playlists.find { it.id == pid }
-            if (playlist != null && playlist.items.isNotEmpty()) {
-                val nextIdx = (idx + 1) % playlist.items.size
-                // 自动播放下一首时，直接调用 loadOnline/loadLocal 逻辑
-                val nextItem = playlist.items[nextIdx]
-                playingIndex = nextIdx
-                scope.launch {
-                    msg = "正在自动播放下一首: ${nextItem.title}..."
-                    runCatching {
-                        val localFile = Storage.getMusicFile(nextItem.source, nextItem.id)
-                        if (localFile.exists()) {
-                            player.loadLocal(LocalTrack(
-                                id = nextItem.id, path = localFile.absolutePath,
-                                title = nextItem.title, artist = nextItem.artist,
-                                album = nextItem.album, durationMillis = nextItem.durationMs,
-                                source = nextItem.source
-                            ), onlineInfo = OnlineTrack(
-                                id = nextItem.id, title = nextItem.title, artist = nextItem.artist,
-                                album = nextItem.album, durationMillis = nextItem.durationMs,
-                                previewUrl = "", coverUrl = nextItem.coverUrl,
-                                quality = nextItem.quality, source = nextItem.source,
-                                videoUrl = nextItem.videoUrl, videoWidth = nextItem.videoWidth,
-                                videoHeight = nextItem.videoHeight, videoQuality = nextItem.videoQuality,
-                                headers = nextItem.headers
-                            ))
-                        } else {
-                            val stream = chain.streamUrlFor(nextItem.source, nextItem.id)
-                            player.loadOnline(OnlineTrack(
-                                id = nextItem.id, title = nextItem.title, artist = nextItem.artist,
-                                album = nextItem.album, durationMillis = nextItem.durationMs,
-                                previewUrl = stream.url, coverUrl = nextItem.coverUrl,
-                                quality = stream.quality ?: nextItem.quality, source = nextItem.source,
-                                videoUrl = stream.videoUrl, videoWidth = stream.videoWidth,
-                                videoHeight = stream.videoHeight, videoQuality = stream.videoQuality,
-                                headers = stream.headers
-                            ))
+        if (!isSwitching) {
+            val pid = playingPlaylistId
+            val idx = playingIndex
+            if (pid != null && idx != -1) {
+                isSwitching = true
+                val playlist = library.playlists.find { it.id == pid }
+                if (playlist != null && playlist.items.isNotEmpty()) {
+                    val nextIdx = (idx + 1) % playlist.items.size
+                    val nextItem = playlist.items[nextIdx]
+                    playingIndex = nextIdx
+                    scope.launch {
+                        try {
+                            msg = "正在自动播放下一首: ${nextItem.title}..."
+                            val localFile = Storage.getMusicFile(nextItem.source, nextItem.id)
+                            if (localFile.exists()) {
+                                player.loadLocal(LocalTrack(
+                                    id = nextItem.id, path = localFile.absolutePath,
+                                    title = nextItem.title, artist = nextItem.artist,
+                                    album = nextItem.album, durationMillis = nextItem.durationMs,
+                                    source = nextItem.source
+                                ), onlineInfo = OnlineTrack(
+                                    id = nextItem.id, title = nextItem.title, artist = nextItem.artist,
+                                    album = nextItem.album, durationMillis = nextItem.durationMs,
+                                    previewUrl = "", coverUrl = nextItem.coverUrl,
+                                    quality = nextItem.quality, source = nextItem.source,
+                                    videoUrl = nextItem.videoUrl, videoWidth = nextItem.videoWidth,
+                                    videoHeight = nextItem.videoHeight, videoQuality = nextItem.videoQuality,
+                                    headers = nextItem.headers
+                                ))
+                            } else {
+                                val stream = chain.streamUrlFor(nextItem.source, nextItem.id)
+                                player.loadOnline(OnlineTrack(
+                                    id = nextItem.id, title = nextItem.title, artist = nextItem.artist,
+                                    album = nextItem.album, durationMillis = nextItem.durationMs,
+                                    previewUrl = stream.url, coverUrl = nextItem.coverUrl,
+                                    quality = stream.quality ?: nextItem.quality, source = nextItem.source,
+                                    videoUrl = stream.videoUrl, videoWidth = stream.videoWidth,
+                                    videoHeight = stream.videoHeight, videoQuality = stream.videoQuality,
+                                    headers = stream.headers
+                                ))
+                            }
+                            player.play()
+                            coverUrl = nextItem.coverUrl
+                        } finally {
+                            delay(800) // 防止快速连续触发
+                            isSwitching = false
                         }
-                        player.play()
-                        coverUrl = nextItem.coverUrl
                     }
+                } else {
+                    isSwitching = false
                 }
             }
         }
